@@ -1,0 +1,28 @@
+{
+  "name": "discord-ticket-bot",
+  "version": "1.0.0",
+  "description": "Comprehensive Discord Ticket Bot with advanced features",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node --no-warnings src/index.js",
+    "dev": "nodemon --no-warnings src/index.js",
+    "deploy": "node --no-warnings src/deploy-commands.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio"
+  },
+  "keywords": ["discord", "bot", "ticket", "support"],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "@prisma/client": "^5.9.1",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.1",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3",
+    "prisma": "^5.9.1"
+  }
+}

@@ -1,0 +1,13 @@
+node_modules/
+.env
+*.log
+.DS_Store
+prisma/migrations/
+dist/
+build/
+.vscode/
+.idea/
+*.swp
+*.swo
+package-lock.json
+yarn.lock
