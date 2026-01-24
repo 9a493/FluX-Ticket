@@ -5,6 +5,8 @@ import { dirname, join } from 'path';
 import { readdirSync } from 'fs';
 import { pathToFileURL } from 'url';
 import logger from './utils/logger.js';
+import { testDatabaseConnection, disconnectDatabase } from './utils/database.js';
+import { startHealthServer } from './server.js';
 
 dotenv.config();
 
@@ -72,8 +74,33 @@ process.on('uncaughtException', error => {
     process.exit(1);
 });
 
-// Login
-client.login(process.env.TOKEN).catch(error => {
-    logger.error('Failed to login:', error);
-    process.exit(1);
+process.on('SIGINT', async () => {
+    logger.info('SIGINT sinyali alındı, bot kapatılıyor...');
+    await disconnectDatabase();
+    process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+    logger.info('SIGTERM sinyali alındı, bot kapatılıyor...');
+    await disconnectDatabase();
+    process.exit(0);
+});
+
+// Database bağlantısını test et ve botu başlat
+testDatabaseConnection().then(connected => {
+    if (!connected) {
+        logger.error('Database bağlantısı kurulamadı, bot başlatılamıyor!');
+        process.exit(1);
+    }
+
+    // Health check server'ı başlat (Render için)
+    if (process.env.NODE_ENV === 'production') {
+        startHealthServer();
+    }
+
+    // Login
+    client.login(process.env.TOKEN).catch(error => {
+        logger.error('Failed to login:', error);
+        process.exit(1);
+    });
 });

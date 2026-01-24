@@ -1,0 +1,118 @@
+// Prisma Schema for Discord Ticket Bot
+// SQLite version (for local development)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Guild (Sunucu) Ayarları
+model Guild {
+  id              String    @id // Discord Guild ID
+  name            String
+  categoryId      String?   // Ticket kategorisi ID
+  panelChannelId  String?   // Panel mesajının olduğu kanal
+  panelMessageId  String?   // Panel mesajının ID'si
+  logChannelId    String?   // Log kanalı
+  staffRoles      String    @default("") // Yetkili roller (virgülle ayrılmış)
+  ticketCount     Int       @default(0) // Toplam açılan ticket sayısı
+  premium         Boolean   @default(false) // Premium özellikler
+  language        String    @default("tr") // Dil ayarı
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  tickets         Ticket[]
+  categories      Category[]
+  stats           GuildStats?
+}
+
+// Ticket Kategorileri (Destek, Satış, Şikayet vs.)
+model Category {
+  id              String   @id @default(cuid())
+  guildId         String
+  name            String   // Kategori adı (Destek, Satış, etc.)
+  emoji           String?  // Emoji
+  description     String?
+  staffRoles      String   @default("") // Bu kategoriye özel yetkili roller (virgülle ayrılmış)
+  color           String   @default("#5865F2") // Embed rengi
+  enabled         Boolean  @default(true)
+  order           Int      @default(0) // Sıralama
+  createdAt       DateTime @default(now())
+  
+  guild           Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  tickets         Ticket[]
+  
+  @@unique([guildId, name])
+}
+
+// Ticket
+model Ticket {
+  id              String   @id @default(cuid())
+  ticketNumber    Int      // #0001, #0002 formatında
+  channelId       String   @unique // Discord kanal ID
+  guildId         String
+  categoryId      String?  // Hangi kategoriye ait
+  userId          String   // Ticketı açan kullanıcı
+  status          String   @default("open") // open, claimed, closed, archived
+  priority        Int      @default(1) // 1: düşük, 2: orta, 3: yüksek, 4: acil
+  claimedBy       String?  // Ticketı sahiplenen yetkili
+  closedBy        String?  // Ticketı kapatan kişi
+  closeReason     String?  // Kapanış sebebi
+  rating          Int?     // 1-5 arası memnuniyet puanı
+  tags            String   @default("") // Etiketler (virgülle ayrılmış)
+  messageCount    Int      @default(0) // Mesaj sayısı
+  transcriptUrl   String?  // Transcript linki
+  createdAt       DateTime @default(now())
+  claimedAt       DateTime?
+  closedAt        DateTime?
+  lastActivity    DateTime @default(now()) // Son aktivite (auto-close için)
+  
+  guild           Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  category        Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  
+  @@unique([guildId, ticketNumber])
+}
+
+// Guild İstatistikleri (Dashboard için)
+model GuildStats {
+  id                    String   @id @default(cuid())
+  guildId               String   @unique
+  totalTickets          Int      @default(0)
+  openTickets           Int      @default(0)
+  closedTickets         Int      @default(0)
+  averageResponseTime   Int      @default(0) // Dakika cinsinden
+  averageCloseTime      Int      @default(0) // Dakika cinsinden
+  averageRating         Float?   // Ortalama memnuniyet puanı
+  updatedAt             DateTime @updatedAt
+  
+  guild                 Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+}
+
+// Kullanıcı Verileri (Blacklist, Geçmiş vs.)
+model User {
+  id              String   @id // Discord User ID
+  username        String
+  blacklisted     Boolean  @default(false)
+  blacklistReason String?
+  totalTickets    Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// Canned Responses (Hazır Yanıtlar)
+model CannedResponse {
+  id              String   @id @default(cuid())
+  guildId         String
+  name            String   // Kısa isim (örn: "selam", "hoşgeldin")
+  content         String   // Yanıt içeriği
+  createdBy       String   // Oluşturan yetkili
+  useCount        Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@unique([guildId, name])
+}

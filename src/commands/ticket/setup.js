@@ -1,5 +1,6 @@
 import { SlashCommandBuilder, PermissionFlagsBits, ChannelType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import logger from '../../utils/logger.js';
+import { guildDB } from '../../utils/database.js';
 
 export default {
     data: new SlashCommandBuilder()
@@ -74,16 +75,20 @@ export default {
                 components: [row],
             });
 
-            // Konfigürasyonu kaydet (şimdilik sadece log'layacağız, database eklenince kaydedilecek)
-            const config = {
-                guildId: interaction.guild.id,
-                panelChannelId: panelChannel.id,
+            // Konfigürasyonu database'e kaydet
+            await guildDB.setup(interaction.guild.id, {
                 categoryId: category.id,
-                staffRoleId: staffRole.id,
+                panelChannelId: panelChannel.id,
                 logChannelId: logChannel?.id || null,
-            };
+                staffRoles: [staffRole.id],
+            });
 
-            logger.info(`Ticket sistemi kuruldu: ${interaction.guild.name}`, config);
+            logger.info(`Ticket sistemi kuruldu: ${interaction.guild.name}`, {
+                guildId: interaction.guild.id,
+                categoryId: category.id,
+                panelChannelId: panelChannel.id,
+                staffRoleId: staffRole.id,
+            });
 
             // Başarı mesajı
             const successEmbed = new EmbedBuilder()
