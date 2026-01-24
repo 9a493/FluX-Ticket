@@ -1,26 +1,26 @@
-import { SlashCommandBuilder, PermissionFlagsBits, ChannelType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
-import logger from '../../utils/logger.js';
+import { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } from 'discord.js';
 import { guildDB } from '../../utils/database.js';
+import logger from '../../utils/logger.js';
 
 export default {
     data: new SlashCommandBuilder()
         .setName('setup')
         .setDescription('Ticket sistemini kurar')
         .addChannelOption(option =>
-            option.setName('kanal')
+            option.setName('kategori')
+                .setDescription('Ticket kanallarının oluşturulacağı kategori')
+                .setRequired(true)
+                .addChannelTypes(ChannelType.GuildCategory)
+        )
+        .addChannelOption(option =>
+            option.setName('panel-kanal')
                 .setDescription('Ticket panelinin gönderileceği kanal')
                 .setRequired(true)
                 .addChannelTypes(ChannelType.GuildText)
         )
-        .addChannelOption(option =>
-            option.setName('kategori')
-                .setDescription('Ticketların oluşturulacağı kategori')
-                .setRequired(true)
-                .addChannelTypes(ChannelType.GuildCategory)
-        )
         .addRoleOption(option =>
             option.setName('yetkili-rol')
-                .setDescription('Ticketları görebilecek yetkili rolü')
+                .setDescription('Ticketlara erişebilecek yetkili rolü')
                 .setRequired(true)
         )
         .addChannelOption(option =>
@@ -29,19 +29,47 @@ export default {
                 .setRequired(false)
                 .addChannelTypes(ChannelType.GuildText)
         )
+        .addRoleOption(option =>
+            option.setName('yetkili-rol-2')
+                .setDescription('İkinci yetkili rolü (opsiyonel)')
+                .setRequired(false)
+        )
+        .addRoleOption(option =>
+            option.setName('yetkili-rol-3')
+                .setDescription('Üçüncü yetkili rolü (opsiyonel)')
+                .setRequired(false)
+        )
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     async execute(interaction) {
         await interaction.deferReply({ ephemeral: true });
 
-        const panelChannel = interaction.options.getChannel('kanal');
         const category = interaction.options.getChannel('kategori');
-        const staffRole = interaction.options.getRole('yetkili-rol');
+        const panelChannel = interaction.options.getChannel('panel-kanal');
         const logChannel = interaction.options.getChannel('log-kanal');
+        
+        // Yetkili rolleri topla
+        const staffRoles = [
+            interaction.options.getRole('yetkili-rol'),
+            interaction.options.getRole('yetkili-rol-2'),
+            interaction.options.getRole('yetkili-rol-3'),
+        ].filter(r => r !== null);
+
+        const staffRoleIds = staffRoles.map(r => r.id);
 
         try {
-            // Embed oluştur
-            const embed = new EmbedBuilder()
+            // Guild ayarlarını kaydet/güncelle
+            const guild = await guildDB.getOrCreate(interaction.guild.id, interaction.guild.name);
+            
+            await guildDB.setup(interaction.guild.id, {
+                categoryId: category.id,
+                panelChannelId: panelChannel.id,
+                logChannelId: logChannel?.id || null,
+                staffRoles: staffRoleIds,
+            });
+
+            // Panel embed'i oluştur
+            const panelEmbed = new EmbedBuilder()
                 .setColor('#5865F2')
                 .setTitle('🎫 Destek Ticket Sistemi')
                 .setDescription(
@@ -60,57 +88,72 @@ export default {
                 .setFooter({ text: `${interaction.guild.name} Destek Sistemi` })
                 .setTimestamp();
 
-            // Button oluştur
-            const button = new ButtonBuilder()
+            // Panel butonu
+            const createButton = new ButtonBuilder()
                 .setCustomId('create_ticket')
                 .setLabel('Ticket Oluştur')
                 .setEmoji('🎫')
                 .setStyle(ButtonStyle.Primary);
 
-            const row = new ActionRowBuilder().addComponents(button);
+            const row = new ActionRowBuilder().addComponents(createButton);
 
             // Paneli gönder
-            await panelChannel.send({
-                embeds: [embed],
+            const panelMessage = await panelChannel.send({
+                embeds: [panelEmbed],
                 components: [row],
             });
 
-            // Konfigürasyonu database'e kaydet
-            await guildDB.setup(interaction.guild.id, {
-                categoryId: category.id,
-                panelChannelId: panelChannel.id,
-                logChannelId: logChannel?.id || null,
-                staffRoles: [staffRole.id],
-            });
-
-            logger.info(`Ticket sistemi kuruldu: ${interaction.guild.name}`, {
-                guildId: interaction.guild.id,
-                categoryId: category.id,
-                panelChannelId: panelChannel.id,
-                staffRoleId: staffRole.id,
+            // Panel mesaj ID'sini kaydet
+            await guildDB.update(interaction.guild.id, {
+                panelMessageId: panelMessage.id,
             });
 
             // Başarı mesajı
             const successEmbed = new EmbedBuilder()
                 .setColor('#57F287')
                 .setTitle('✅ Ticket Sistemi Kuruldu!')
+                .setDescription('Ticket sistemi başarıyla kuruldu ve kullanıma hazır.')
                 .addFields(
-                    { name: '📢 Panel Kanalı', value: `${panelChannel}`, inline: true },
-                    { name: '📁 Kategori', value: `${category.name}`, inline: true },
-                    { name: '👮 Yetkili Rolü', value: `${staffRole}`, inline: true },
+                    { name: '📁 Ticket Kategorisi', value: `${category}`, inline: true },
+                    { name: '📝 Panel Kanalı', value: `${panelChannel}`, inline: true },
+                    { name: '📋 Log Kanalı', value: logChannel ? `${logChannel}` : '❌ Ayarlanmadı', inline: true },
+                    { name: '👮 Yetkili Rolleri', value: staffRoles.map(r => `${r}`).join(', ') || 'Yok', inline: false },
                 )
+                .addFields({
+                    name: '📖 Sonraki Adımlar',
+                    value: 
+                        '• `/category add` - Ticket kategorileri ekleyin\n' +
+                        '• `/canned add` - Hazır yanıtlar oluşturun\n' +
+                        '• `/panel` - Farklı kanallara panel gönderin',
+                    inline: false,
+                })
+                .setFooter({ text: 'Yardım için /help komutunu kullanın' })
                 .setTimestamp();
-
-            if (logChannel) {
-                successEmbed.addFields({ name: '📋 Log Kanalı', value: `${logChannel}`, inline: true });
-            }
 
             await interaction.editReply({ embeds: [successEmbed] });
 
+            // Log kanalına bilgi mesajı
+            if (logChannel) {
+                const logEmbed = new EmbedBuilder()
+                    .setColor('#5865F2')
+                    .setTitle('⚙️ Ticket Sistemi Kuruldu')
+                    .setDescription(`Ticket sistemi ${interaction.user} tarafından kuruldu.`)
+                    .addFields(
+                        { name: 'Kategori', value: `${category}`, inline: true },
+                        { name: 'Panel', value: `${panelChannel}`, inline: true },
+                        { name: 'Yetkililer', value: staffRoles.map(r => `${r}`).join(', '), inline: true },
+                    )
+                    .setTimestamp();
+
+                await logChannel.send({ embeds: [logEmbed] });
+            }
+
+            logger.info(`Setup completed for ${interaction.guild.name} by ${interaction.user.tag}`);
+
         } catch (error) {
-            logger.error('Setup komutu hatası:', error);
+            logger.error('Setup command hatası:', error);
             await interaction.editReply({
-                content: '❌ Ticket sistemi kurulurken bir hata oluştu! Botun gerekli izinlere sahip olduğundan emin olun.',
+                content: '❌ Ticket sistemi kurulurken bir hata oluştu! Lütfen tekrar deneyin.',
             });
         }
     },

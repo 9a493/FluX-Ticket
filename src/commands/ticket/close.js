@@ -9,6 +9,7 @@ export default {
             option.setName('sebep')
                 .setDescription('Kapatma sebebi (opsiyonel)')
                 .setRequired(false)
+                .setMaxLength(200)
         ),
 
     async execute(interaction) {

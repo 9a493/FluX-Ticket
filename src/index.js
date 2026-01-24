@@ -1,106 +1,155 @@
-import { Client, GatewayIntentBits, Collection, Partials } from 'discord.js';
-import dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { Client, Collection, GatewayIntentBits, Partials } from 'discord.js';
 import { readdirSync } from 'fs';
-import { pathToFileURL } from 'url';
+import { join, dirname } from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
+import dotenv from 'dotenv';
 import logger from './utils/logger.js';
 import { testDatabaseConnection, disconnectDatabase } from './utils/database.js';
 import { startHealthServer } from './server.js';
+import { startAutoClose } from './utils/autoClose.js';
 
-dotenv.config();
-
+// ES modules için __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Client oluştur
+// .env dosyasını yükle
+dotenv.config();
+
+// Discord Client
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.MessageContent,
+        GatewayIntentBits.DirectMessages,
     ],
-    partials: [Partials.Channel, Partials.Message, Partials.GuildMember],
+    partials: [
+        Partials.Channel,
+        Partials.Message,
+        Partials.User,
+        Partials.GuildMember,
+    ],
 });
 
 // Collections
 client.commands = new Collection();
 client.cooldowns = new Collection();
 
-// Command Handler
-const commandFolders = readdirSync(join(__dirname, 'commands'));
-for (const folder of commandFolders) {
-    const commandFiles = readdirSync(join(__dirname, 'commands', folder)).filter(
-        file => file.endsWith('.js')
-    );
-    
-    for (const file of commandFiles) {
-        const filePath = join(__dirname, 'commands', folder, file);
-        const fileURL = pathToFileURL(filePath).href;
-        import(fileURL).then(command => {
-            if ('data' in command.default && 'execute' in command.default) {
-                client.commands.set(command.default.data.name, command.default);
-                logger.info(`✅ Loaded command: ${command.default.data.name}`);
-            } else {
-                logger.warn(`⚠️  Command at ${filePath} is missing required "data" or "execute" property.`);
+// Komutları yükle
+async function loadCommands() {
+    const commandsPath = join(__dirname, 'commands');
+    const commandFolders = readdirSync(commandsPath);
+
+    for (const folder of commandFolders) {
+        const folderPath = join(commandsPath, folder);
+        const commandFiles = readdirSync(folderPath).filter(file => file.endsWith('.js'));
+
+        for (const file of commandFiles) {
+            const filePath = join(folderPath, file);
+            const fileURL = pathToFileURL(filePath).href;
+            
+            try {
+                const command = await import(fileURL);
+                
+                if ('data' in command.default && 'execute' in command.default) {
+                    client.commands.set(command.default.data.name, command.default);
+                    logger.info(`✅ Komut yüklendi: ${command.default.data.name}`);
+                } else {
+                    logger.warn(`⚠️ ${file} dosyasında "data" veya "execute" eksik.`);
+                }
+            } catch (error) {
+                logger.error(`❌ Komut yükleme hatası (${file}):`, error);
             }
-        });
+        }
     }
 }
 
-// Event Handler
-const eventFiles = readdirSync(join(__dirname, 'events')).filter(file => file.endsWith('.js'));
-for (const file of eventFiles) {
-    const filePath = join(__dirname, 'events', file);
-    const fileURL = pathToFileURL(filePath).href;
-    import(fileURL).then(event => {
-        if (event.default.once) {
-            client.once(event.default.name, (...args) => event.default.execute(...args));
-        } else {
-            client.on(event.default.name, (...args) => event.default.execute(...args));
+// Eventleri yükle
+async function loadEvents() {
+    const eventsPath = join(__dirname, 'events');
+    const eventFiles = readdirSync(eventsPath).filter(file => file.endsWith('.js'));
+
+    for (const file of eventFiles) {
+        const filePath = join(eventsPath, file);
+        const fileURL = pathToFileURL(filePath).href;
+        
+        try {
+            const event = await import(fileURL);
+            
+            if (event.default.once) {
+                client.once(event.default.name, (...args) => event.default.execute(...args));
+            } else {
+                client.on(event.default.name, (...args) => event.default.execute(...args));
+            }
+            
+            logger.info(`✅ Event yüklendi: ${event.default.name}`);
+        } catch (error) {
+            logger.error(`❌ Event yükleme hatası (${file}):`, error);
         }
-        logger.info(`✅ Loaded event: ${event.default.name}`);
-    });
+    }
 }
 
-// Error Handling
-process.on('unhandledRejection', error => {
-    logger.error('Unhandled promise rejection:', error);
-});
+// Ana başlatma fonksiyonu
+async function main() {
+    try {
+        logger.info('🚀 Bot başlatılıyor...');
 
-process.on('uncaughtException', error => {
-    logger.error('Uncaught exception:', error);
-    process.exit(1);
-});
+        // Database bağlantısını test et
+        const dbConnected = await testDatabaseConnection();
+        if (!dbConnected) {
+            throw new Error('Database bağlantısı kurulamadı!');
+        }
 
+        // Komutları yükle
+        await loadCommands();
+        logger.info(`📦 ${client.commands.size} komut yüklendi`);
+
+        // Eventleri yükle
+        await loadEvents();
+
+        // Health check server başlat (Render için)
+        startHealthServer();
+
+        // Discord'a bağlan
+        await client.login(process.env.TOKEN);
+
+        // Auto-close sistemini başlat (client hazır olduktan sonra)
+        client.once('ready', () => {
+            startAutoClose(client);
+        });
+
+    } catch (error) {
+        logger.error('❌ Bot başlatma hatası:', error);
+        process.exit(1);
+    }
+}
+
+// Graceful shutdown
 process.on('SIGINT', async () => {
-    logger.info('SIGINT sinyali alındı, bot kapatılıyor...');
+    logger.info('🛑 SIGINT sinyali alındı, kapatılıyor...');
     await disconnectDatabase();
+    client.destroy();
     process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-    logger.info('SIGTERM sinyali alındı, bot kapatılıyor...');
+    logger.info('🛑 SIGTERM sinyali alındı, kapatılıyor...');
     await disconnectDatabase();
+    client.destroy();
     process.exit(0);
 });
 
-// Database bağlantısını test et ve botu başlat
-testDatabaseConnection().then(connected => {
-    if (!connected) {
-        logger.error('Database bağlantısı kurulamadı, bot başlatılamıyor!');
-        process.exit(1);
-    }
-
-    // Health check server'ı başlat (Render için)
-    if (process.env.NODE_ENV === 'production') {
-        startHealthServer();
-    }
-
-    // Login
-    client.login(process.env.TOKEN).catch(error => {
-        logger.error('Failed to login:', error);
-        process.exit(1);
-    });
+// Unhandled promise rejection
+process.on('unhandledRejection', (error) => {
+    logger.error('❌ Unhandled promise rejection:', error);
 });
+
+// Uncaught exception
+process.on('uncaughtException', (error) => {
+    logger.error('❌ Uncaught exception:', error);
+    process.exit(1);
+});
+
+// Başlat
+main();

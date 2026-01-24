@@ -1,197 +1,262 @@
-# 🎫 Discord Ticket Bot - Sprint 2 (Database + Render Deployment)
+# 🎫 FluX Ticket Bot v2.0
 
-Profesyonel Discord ticket sistemi botu - PostgreSQL + Render ile 7/24 çalışır.
+Modern ve özellik dolu Discord ticket botu. Discord.js v14, Prisma ORM ve birçok gelişmiş özellik ile.
 
-## 📋 Özellikler (Sprint 2)
+![Discord.js](https://img.shields.io/badge/discord.js-v14-blue)
+![Node.js](https://img.shields.io/badge/node.js-v18+-green)
+![Prisma](https://img.shields.io/badge/prisma-v5-purple)
+![License](https://img.shields.io/badge/license-MIT-yellow)
 
-### ✅ Temel Özellikler
-- Slash Commands (Discord'un yeni komut sistemi)
-- Ticket oluşturma/kapatma
-- Otomatik izin yönetimi
-- Embed mesajları ve butonlar
-- Yetkili rol sistemi
-- Detaylı loglama
-- Cooldown sistemi
-- Error handling
+## ✨ Özellikler
 
-### ✅ Yeni Özellikler (Sprint 2)
-- **PostgreSQL Database** - Tüm veriler kalıcı
-- **Render Deployment** - 7/24 çalışır
-- **Gelişmiş Ticket Sistemi**:
-  - `/add` - Ticket'a kullanıcı ekle
-  - `/remove` - Ticket'tan kullanıcı çıkar
-  - `/claim` - Ticket'ı sahiplen
-  - `/close` - Ticket'ı kapat (slash command)
+### 🎫 Ticket Sistemi
+- ✅ Slash command desteği
+- ✅ Buton ile ticket oluşturma
+- ✅ Çoklu kategori desteği
+- ✅ Otomatik ticket numaralama (#0001, #0002...)
+- ✅ Ticket claim/unclaim sistemi
+- ✅ Öncelik seviyeleri (Düşük/Orta/Yüksek/Acil)
+- ✅ Etiket sistemi
+- ✅ Kullanıcı ekleme/çıkarma
+- ✅ Ticket transfer etme
+- ✅ Kategori değiştirme (move)
+- ✅ Kanal yeniden adlandırma
 
-## 🚀 Kurulum
+### 📄 Transcript & Rating
+- ✅ HTML formatında transcript oluşturma
+- ✅ Kapanışta 1-5 yıldız değerlendirme
+- ✅ Transcript URL'si database'de saklanır
 
-### 1. Gereksinimler
+### 🤖 Otomasyon
+- ✅ Auto-close (48+ saat inaktif ticketlar)
+- ✅ İnaktivite uyarısı (24 saat önceden)
+- ✅ Hazır yanıt sistemi (canned responses)
+
+### 📊 İstatistikler
+- ✅ Sunucu istatistikleri (/stats)
+- ✅ Yetkili performans istatistikleri (/mystats)
+- ✅ Kategori bazlı istatistikler
+- ✅ Top 5 aktif yetkili
+
+### 🔒 Güvenlik
+- ✅ Blacklist sistemi
+- ✅ Kullanıcı başına ticket limiti
+- ✅ Yetki kontrolü (staff roles)
+- ✅ Cooldown sistemi
+
+### 🛠️ Teknik
+- ✅ Discord.js v14
+- ✅ Prisma ORM (SQLite/PostgreSQL)
+- ✅ Winston logging
+- ✅ ES Modules
+- ✅ Render deployment desteği
+- ✅ Health check endpoint
+
+---
+
+## 📦 Kurulum
+
+### Gereksinimler
 - Node.js v18 veya üzeri
-- Bir Discord Bot hesabı ([Discord Developer Portal](https://discord.com/developers/applications))
+- npm veya yarn
+- Discord Bot Token
 
-### 2. Klasör Yapısını Oluştur
-
+### 1. Repoyu klonla
 ```bash
-mkdir -p discord-ticket-bot/{src/{commands/{ticket,utility,admin},events,utils,config,services,models},logs}
-cd discord-ticket-bot
+git clone https://github.com/9a493/FluX-Ticket.git
+cd FluX-Ticket
 ```
 
-### 3. Paketleri Yükle
-
+### 2. Bağımlılıkları yükle
 ```bash
 npm install
 ```
 
-### 4. Environment Variables
+### 3. Environment dosyasını oluştur
+```bash
+cp .env.example .env
+```
 
-`.env` dosyası oluştur ve şu bilgileri doldur:
-
+`.env` dosyasını düzenle:
 ```env
 TOKEN=your_bot_token_here
 CLIENT_ID=your_client_id_here
-GUILD_ID=your_test_server_id_here  # Test için
+GUILD_ID=your_test_guild_id_here
+DATABASE_URL="file:./dev.db"
 NODE_ENV=development
 ```
 
-### 5. Bot'u Discord Developer Portal'dan Ayarla
-
-1. [Discord Developer Portal](https://discord.com/developers/applications)'a git
-2. "New Application" tıkla
-3. Bot sekmesine git ve "Add Bot" tıkla
-4. Token'ı kopyala ve `.env` dosyasına yapıştır
-5. **Privileged Gateway Intents** altında şunları aktif et:
-   - ✅ SERVER MEMBERS INTENT
-   - ✅ MESSAGE CONTENT INTENT
-
-6. OAuth2 > URL Generator:
-   - Scopes: `bot`, `applications.commands`
-   - Bot Permissions:
-     - ✅ Manage Channels
-     - ✅ Manage Roles
-     - ✅ Send Messages
-     - ✅ Embed Links
-     - ✅ Attach Files
-     - ✅ Read Message History
-     - ✅ Mention Everyone
-     - ✅ Use Slash Commands
-
-### 6. Komutları Discord'a Kaydet
-
+### 4. Database'i oluştur
 ```bash
-npm run deploy
+npx prisma db push
+npx prisma generate
 ```
 
-### 7. Botu Başlat
-
-**Development mode (auto-restart):**
+### 5. Komutları Discord'a kaydet
 ```bash
+# Test sunucusuna (hızlı)
+npm run deploy
+
+# Global (1 saat sürebilir)
+npm run deploy:global
+```
+
+### 6. Botu başlat
+```bash
+npm start
+
+# veya development modunda
 npm run dev
 ```
 
-**Production mode:**
-```bash
-npm start
-```
+---
 
-## 📁 Proje Yapısı
+## 🚀 Kullanım
 
-```
-discord-ticket-bot/
-├── src/
-│   ├── commands/
-│   │   ├── ticket/
-│   │   │   └── setup.js          # Ticket sistemi kurulum komutu
-│   │   └── utility/
-│   │       └── ping.js           # Ping komutu
-│   ├── events/
-│   │   ├── ready.js              # Bot hazır olduğunda
-│   │   ├── interactionCreate.js  # Komut/button handler
-│   │   └── guildCreate.js        # Bot sunucuya eklendiğinde
-│   ├── utils/
-│   │   ├── logger.js             # Winston logger
-│   │   └── ticketManager.js      # Ticket açma/kapama logic
-│   ├── index.js                  # Ana bot dosyası
-│   └── deploy-commands.js        # Komutları Discord'a kaydetme
-├── logs/                         # Log dosyaları (otomatik oluşur)
-├── .env                          # Environment variables
-├── .gitignore
-├── package.json
-└── README.md
-```
+### İlk Kurulum
+1. Botu sunucunuza davet edin (Administrator yetkisi ile)
+2. `/setup` komutunu kullanın
+3. Ticket paneli otomatik oluşturulacak
 
-## 🎮 Kullanım
+### Komutlar
 
-### Sunucuda Setup
+#### 🎫 Ticket Komutları
+| Komut | Açıklama |
+|-------|----------|
+| `/close [sebep]` | Ticketı kapatır |
+| `/claim` | Ticketı sahiplenir |
+| `/unclaim` | Ticket sahipliğini bırakır |
+| `/add @kullanıcı` | Kullanıcı ekler |
+| `/remove @kullanıcı` | Kullanıcı çıkarır |
+| `/rename <isim>` | Kanalı yeniden adlandırır |
+| `/transfer @yetkili` | Başka yetkiliye devreder |
+| `/move <kategori>` | Kategori değiştirir |
+| `/priority <seviye>` | Öncelik belirler |
+| `/tag add/remove/list` | Etiket yönetimi |
+| `/info` | Ticket bilgilerini gösterir |
 
-1. Botu sunucuna davet et
-2. `/setup` komutunu kullan:
-   - **Kanal:** Ticket panelinin gönderileceği kanal
-   - **Kategori:** Ticketların oluşturulacağı kategori
-   - **Yetkili Rol:** Ticketları görecek rol
-   - **Log Kanal:** (Opsiyonel) Logların gönderileceği kanal
+#### 👮 Yetkili Komutları
+| Komut | Açıklama |
+|-------|----------|
+| `/canned add/remove/list/use` | Hazır yanıt yönetimi |
+| `/mystats` | Kişisel istatistikler |
 
-### Ticket Oluşturma
+#### ⚙️ Yönetici Komutları
+| Komut | Açıklama |
+|-------|----------|
+| `/setup` | Bot kurulumu |
+| `/panel [kanal]` | Ticket paneli gönderir |
+| `/category add/remove/list` | Kategori yönetimi |
+| `/blacklist @kullanıcı` | Kullanıcıyı engeller |
+| `/unblacklist @kullanıcı` | Engeli kaldırır |
+| `/stats` | Sunucu istatistikleri |
 
-1. Kullanıcılar panel mesajındaki "Ticket Oluştur" butonuna tıklar
-2. Otomatik olarak özel bir kanal oluşturulur
-3. Sadece kullanıcı ve yetkili rol kanalı görebilir
-
-### Ticket Kapatma
-
-1. Ticket kanalında "Ticketı Kapat" butonuna tıkla
-2. Onaylama mesajında "Evet, Kapat" seç
-3. Kanal 5 saniye sonra otomatik silinir
-
-## 📊 Mevcut Komutlar
-
-| Komut | Açıklama | İzin Gereksinimi |
-|-------|----------|------------------|
-| `/setup` | Ticket sistemini kurar | Administrator |
-| `/ping` | Bot gecikme süresini gösterir | Herkes |
-
-## 🔜 Gelecek Özellikler
-
-Sprint 2'de eklenecekler:
-- [ ] `/add` - Ticket'a kullanıcı ekle
-- [ ] `/remove` - Ticket'tan kullanıcı çıkar
-- [ ] `/claim` - Ticket'ı sahiplen
-- [ ] Çoklu ticket kategorileri
-- [ ] PostgreSQL database entegrasyonu
-- [ ] Detaylı transcript sistemi
-- [ ] Rate limiting (Redis)
-
-## 🐛 Sorun Giderme
-
-### "Application did not respond" hatası
-- Botun yeterli izinlere sahip olduğundan emin ol
-- Komutları tekrar deploy et: `npm run deploy`
-
-### Bot offline görünüyor
-- `.env` dosyasındaki TOKEN'ı kontrol et
-- Bot'un Developer Portal'da aktif olduğundan emin ol
-
-### Ticket kanalı oluşturulmuyor
-- Botun "Manage Channels" iznine sahip olduğunu kontrol et
-- Kategori limitine ulaşmadığınızı kontrol et (max 50 kanal)
-
-## 📝 Loglar
-
-Tüm aktiviteler `logs/` klasöründe saklanır:
-- `combined.log` - Tüm loglar
-- `error.log` - Sadece hatalar
-
-## 🤝 Katkıda Bulunma
-
-Bu proje aktif geliştirme aşamasında. Öneri ve geri bildirimlerinizi bekliyoruz!
-
-## 📄 Lisans
-
-MIT License
+#### 🔧 Genel
+| Komut | Açıklama |
+|-------|----------|
+| `/ping` | Bot gecikmesi |
+| `/help` | Yardım menüsü |
 
 ---
 
-**Geliştirici Notları:**
-- Bu MVP versiyonudur (Minimum Viable Product)
-- Database henüz entegre edilmedi (geçici Map kullanıyor)
-- Production'a almadan önce Redis + PostgreSQL eklenecek
-- Sharding sistemi 2500+ sunucu için gerekli olacak
+## 🗄️ Database Şeması
+
+```
+Guild
+├── id (Discord Guild ID)
+├── categoryId (Discord Category)
+├── logChannelId
+├── staffRoles
+├── ticketCount
+├── categories[]
+├── tickets[]
+└── cannedResponses[]
+
+Ticket
+├── id
+├── ticketNumber
+├── channelId
+├── userId
+├── status (open/claimed/closed)
+├── priority (1-4)
+├── tags
+├── claimedBy
+├── rating (1-5)
+└── transcriptUrl
+
+Category
+├── id
+├── name
+├── emoji
+├── description
+├── staffRoles
+└── enabled
+
+CannedResponse
+├── id
+├── name
+├── content
+├── useCount
+└── createdBy
+```
+
+---
+
+## 🌐 Render Deployment
+
+1. Render.com'da yeni Web Service oluşturun
+2. GitHub reposunu bağlayın
+3. Environment variables ekleyin:
+   - `TOKEN`
+   - `CLIENT_ID`
+   - `DATABASE_URL` (PostgreSQL)
+   - `NODE_ENV=production`
+4. Build command: `npm install && npx prisma generate && npx prisma db push`
+5. Start command: `npm start`
+
+---
+
+## 📝 Changelog
+
+### v2.0.0
+- ✨ Çoklu kategori desteği
+- ✨ Transcript sistemi (HTML)
+- ✨ Rating sistemi (1-5 yıldız)
+- ✨ Auto-close sistemi
+- ✨ Hazır yanıt sistemi
+- ✨ Öncelik seviyeleri
+- ✨ Etiket sistemi
+- ✨ Transfer komutu
+- ✨ Move komutu
+- ✨ Detaylı istatistikler
+- 🐛 Bug fixes
+
+### v1.0.0
+- 🎉 İlk sürüm
+
+---
+
+## 🤝 Katkıda Bulunma
+
+1. Fork yapın
+2. Feature branch oluşturun (`git checkout -b feature/amazing-feature`)
+3. Commit yapın (`git commit -m 'Add amazing feature'`)
+4. Push yapın (`git push origin feature/amazing-feature`)
+5. Pull Request açın
+
+---
+
+## 📄 Lisans
+
+MIT License - Detaylar için [LICENSE](LICENSE) dosyasına bakın.
+
+---
+
+## 💬 Destek
+
+- [GitHub Issues](https://github.com/9a493/FluX-Ticket/issues)
+- Discord: [Sunucu Linki]
+
+---
+
+Made with ❤️ by FluX Team

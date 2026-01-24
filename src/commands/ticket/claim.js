@@ -40,6 +40,11 @@ export default {
 
             // Zaten claim edilmiş mi?
             if (ticket.status === 'claimed') {
+                if (ticket.claimedBy === member.id) {
+                    return interaction.editReply({
+                        content: '❌ Bu ticketı zaten siz sahiplendiniz!',
+                    });
+                }
                 return interaction.editReply({
                     content: `❌ Bu ticket zaten <@${ticket.claimedBy}> tarafından sahiplenilmiş!`,
                 });
@@ -49,7 +54,8 @@ export default {
             await ticketDB.claim(channel.id, member.id);
 
             // Kanal adını güncelle
-            await channel.setName(`ticket-${ticket.ticketNumber.toString().padStart(4, '0')}-${member.user.username}`);
+            const ticketNumber = ticket.ticketNumber.toString().padStart(4, '0');
+            await channel.setName(`ticket-${ticketNumber}-${member.user.username}`);
 
             // Bilgilendirme mesajı
             const embed = new EmbedBuilder()
@@ -57,7 +63,7 @@ export default {
                 .setTitle('✅ Ticket Sahiplenildi')
                 .setDescription(`${member} bu ticketı sahiplendi ve size yardımcı olacaktır.`)
                 .addFields(
-                    { name: '📝 Ticket', value: `#${ticket.ticketNumber.toString().padStart(4, '0')}`, inline: true },
+                    { name: '📝 Ticket', value: `#${ticketNumber}`, inline: true },
                     { name: '👮 Sahiplenen', value: `${member}`, inline: true },
                     { name: '⏰ Sahiplenme Zamanı', value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true },
                 )

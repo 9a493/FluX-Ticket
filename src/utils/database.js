@@ -32,7 +32,7 @@ export async function disconnectDatabase() {
     logger.info('Database bağlantısı kapatıldı');
 }
 
-// Guild Helper Functions
+// ==================== GUILD FUNCTIONS ====================
 export const guildDB = {
     // Guild ayarlarını getir veya oluştur
     async getOrCreate(guildId, guildName) {
@@ -99,9 +99,21 @@ export const guildDB = {
             throw error;
         }
     },
+
+    // Guild sil
+    async delete(guildId) {
+        try {
+            return await prisma.guild.delete({
+                where: { id: guildId },
+            });
+        } catch (error) {
+            logger.error('Guild delete hatası:', error);
+            throw error;
+        }
+    },
 };
 
-// Ticket Helper Functions
+// ==================== TICKET FUNCTIONS ====================
 export const ticketDB = {
     // Yeni ticket oluştur
     async create(guildId, userId, channelId, categoryId = null) {
@@ -137,6 +149,9 @@ export const ticketDB = {
                 }
             });
 
+            // Kullanıcı ticket sayısını artır
+            await userDB.incrementTicketCount(userId);
+
             logger.info(`Ticket oluşturuldu: #${ticketNumber} (${channelId})`);
             return ticket;
         } catch (error) {
@@ -161,6 +176,22 @@ export const ticketDB = {
         }
     },
 
+    // Ticket ID ile getir
+    async getById(ticketId) {
+        try {
+            return await prisma.ticket.findUnique({
+                where: { id: ticketId },
+                include: {
+                    guild: true,
+                    category: true,
+                }
+            });
+        } catch (error) {
+            logger.error('Ticket getById hatası:', error);
+            throw error;
+        }
+    },
+
     // Kullanıcının aktif ticketını getir
     async getUserActiveTicket(guildId, userId) {
         try {
@@ -174,6 +205,22 @@ export const ticketDB = {
         } catch (error) {
             logger.error('getUserActiveTicket hatası:', error);
             throw error;
+        }
+    },
+
+    // Kullanıcının toplam aktif ticket sayısı
+    async getUserTicketCount(guildId, userId) {
+        try {
+            return await prisma.ticket.count({
+                where: {
+                    guildId,
+                    userId,
+                    status: { in: ['open', 'claimed'] }
+                }
+            });
+        } catch (error) {
+            logger.error('getUserTicketCount hatası:', error);
+            return 0;
         }
     },
 
@@ -211,8 +258,26 @@ export const ticketDB = {
         }
     },
 
+    // Ticket unclaim et
+    async unclaim(channelId) {
+        try {
+            return await prisma.ticket.update({
+                where: { channelId },
+                data: {
+                    status: 'open',
+                    claimedBy: null,
+                    claimedAt: null,
+                    lastActivity: new Date(),
+                }
+            });
+        } catch (error) {
+            logger.error('Ticket unclaim hatası:', error);
+            throw error;
+        }
+    },
+
     // Ticket kapat
-    async close(channelId, closedBy, closeReason = null) {
+    async close(channelId, closedBy, closeReason = null, transcriptUrl = null) {
         try {
             const ticket = await prisma.ticket.update({
                 where: { channelId },
@@ -221,6 +286,7 @@ export const ticketDB = {
                     closedBy,
                     closeReason,
                     closedAt: new Date(),
+                    transcriptUrl,
                 }
             });
 
@@ -240,6 +306,36 @@ export const ticketDB = {
         }
     },
 
+    // Ticket yeniden aç
+    async reopen(channelId) {
+        try {
+            const ticket = await prisma.ticket.update({
+                where: { channelId },
+                data: {
+                    status: 'open',
+                    closedBy: null,
+                    closeReason: null,
+                    closedAt: null,
+                    lastActivity: new Date(),
+                }
+            });
+
+            // İstatistikleri güncelle
+            await prisma.guildStats.update({
+                where: { guildId: ticket.guildId },
+                data: {
+                    openTickets: { increment: 1 },
+                    closedTickets: { decrement: 1 },
+                }
+            });
+
+            return ticket;
+        } catch (error) {
+            logger.error('Ticket reopen hatası:', error);
+            throw error;
+        }
+    },
+
     // Mesaj sayısını artır
     async incrementMessages(channelId) {
         try {
@@ -252,7 +348,63 @@ export const ticketDB = {
             });
         } catch (error) {
             // Hata olsa da devam et (kritik değil)
-            logger.warn('Mesaj sayısı güncellenemedi:', error.message);
+            // logger.warn('Mesaj sayısı güncellenemedi:', error.message);
+        }
+    },
+
+    // Öncelik güncelle
+    async setPriority(channelId, priority) {
+        try {
+            return await prisma.ticket.update({
+                where: { channelId },
+                data: { priority },
+            });
+        } catch (error) {
+            logger.error('Ticket setPriority hatası:', error);
+            throw error;
+        }
+    },
+
+    // Tag ekle
+    async addTag(channelId, tag) {
+        try {
+            const ticket = await prisma.ticket.findUnique({
+                where: { channelId },
+                select: { tags: true }
+            });
+
+            const currentTags = ticket?.tags ? ticket.tags.split(',').filter(t => t) : [];
+            if (!currentTags.includes(tag)) {
+                currentTags.push(tag);
+            }
+
+            return await prisma.ticket.update({
+                where: { channelId },
+                data: { tags: currentTags.join(',') },
+            });
+        } catch (error) {
+            logger.error('Ticket addTag hatası:', error);
+            throw error;
+        }
+    },
+
+    // Tag kaldır
+    async removeTag(channelId, tag) {
+        try {
+            const ticket = await prisma.ticket.findUnique({
+                where: { channelId },
+                select: { tags: true }
+            });
+
+            const currentTags = ticket?.tags ? ticket.tags.split(',').filter(t => t && t !== tag) : [];
+
+            return await prisma.ticket.update({
+                where: { channelId },
+                data: { tags: currentTags.join(',') },
+            });
+        } catch (error) {
+            logger.error('Ticket removeTag hatası:', error);
+            throw error;
         }
     },
 
@@ -276,22 +428,84 @@ export const ticketDB = {
             throw error;
         }
     },
+
+    // Guild'in tüm açık ticketlarını getir
+    async getOpenTickets(guildId) {
+        try {
+            return await prisma.ticket.findMany({
+                where: {
+                    guildId,
+                    status: { in: ['open', 'claimed'] }
+                },
+                orderBy: { createdAt: 'desc' }
+            });
+        } catch (error) {
+            logger.error('getOpenTickets hatası:', error);
+            throw error;
+        }
+    },
+
+    // Yetkili istatistikleri
+    async getStaffStats(guildId, userId) {
+        try {
+            const claimed = await prisma.ticket.count({
+                where: { guildId, claimedBy: userId }
+            });
+
+            const closed = await prisma.ticket.count({
+                where: { guildId, closedBy: userId }
+            });
+
+            const avgRating = await prisma.ticket.aggregate({
+                where: { guildId, claimedBy: userId, rating: { not: null } },
+                _avg: { rating: true }
+            });
+
+            return {
+                claimed,
+                closed,
+                averageRating: avgRating._avg.rating || 0,
+            };
+        } catch (error) {
+            logger.error('getStaffStats hatası:', error);
+            throw error;
+        }
+    },
 };
 
-// Category Helper Functions
+// ==================== CATEGORY FUNCTIONS ====================
 export const categoryDB = {
     // Kategori oluştur
     async create(guildId, name, options = {}) {
         try {
+            // Sıralama için son kategori numarasını al
+            const lastCategory = await prisma.category.findFirst({
+                where: { guildId },
+                orderBy: { order: 'desc' }
+            });
+
             return await prisma.category.create({
                 data: {
                     guildId,
                     name,
+                    order: (lastCategory?.order || 0) + 1,
                     ...options,
                 }
             });
         } catch (error) {
             logger.error('Category create hatası:', error);
+            throw error;
+        }
+    },
+
+    // Kategori getir
+    async get(categoryId) {
+        try {
+            return await prisma.category.findUnique({
+                where: { id: categoryId }
+            });
+        } catch (error) {
+            logger.error('Category get hatası:', error);
             throw error;
         }
     },
@@ -308,9 +522,34 @@ export const categoryDB = {
             throw error;
         }
     },
+
+    // Kategori güncelle
+    async update(categoryId, data) {
+        try {
+            return await prisma.category.update({
+                where: { id: categoryId },
+                data,
+            });
+        } catch (error) {
+            logger.error('Category update hatası:', error);
+            throw error;
+        }
+    },
+
+    // Kategori sil
+    async delete(categoryId) {
+        try {
+            return await prisma.category.delete({
+                where: { id: categoryId },
+            });
+        } catch (error) {
+            logger.error('Category delete hatası:', error);
+            throw error;
+        }
+    },
 };
 
-// User Helper Functions
+// ==================== USER FUNCTIONS ====================
 export const userDB = {
     // Kullanıcıyı getir veya oluştur
     async getOrCreate(userId, username) {
@@ -335,6 +574,18 @@ export const userDB = {
         }
     },
 
+    // Kullanıcı getir
+    async get(userId) {
+        try {
+            return await prisma.user.findUnique({
+                where: { id: userId }
+            });
+        } catch (error) {
+            logger.error('User get hatası:', error);
+            return null;
+        }
+    },
+
     // Blacklist kontrolü
     async isBlacklisted(userId) {
         try {
@@ -350,18 +601,244 @@ export const userDB = {
         }
     },
 
-    // Blacklist ekle/çıkar
-    async setBlacklist(userId, blacklisted, reason = null) {
+    // Blacklist ekle
+    async addBlacklist(userId, username, reason = null) {
         try {
-            return await prisma.user.update({
+            return await prisma.user.upsert({
                 where: { id: userId },
-                data: {
-                    blacklisted,
+                update: {
+                    blacklisted: true,
+                    blacklistReason: reason,
+                },
+                create: {
+                    id: userId,
+                    username,
+                    blacklisted: true,
                     blacklistReason: reason,
                 }
             });
         } catch (error) {
-            logger.error('setBlacklist hatası:', error);
+            logger.error('addBlacklist hatası:', error);
+            throw error;
+        }
+    },
+
+    // Blacklist kaldır
+    async removeBlacklist(userId) {
+        try {
+            return await prisma.user.update({
+                where: { id: userId },
+                data: {
+                    blacklisted: false,
+                    blacklistReason: null,
+                }
+            });
+        } catch (error) {
+            logger.error('removeBlacklist hatası:', error);
+            throw error;
+        }
+    },
+
+    // Ticket sayısını artır
+    async incrementTicketCount(userId) {
+        try {
+            await prisma.user.updateMany({
+                where: { id: userId },
+                data: { totalTickets: { increment: 1 } }
+            });
+        } catch (error) {
+            // Kullanıcı yoksa hata verme
+        }
+    },
+};
+
+// ==================== CANNED RESPONSE FUNCTIONS ====================
+export const cannedDB = {
+    // Hazır yanıt oluştur
+    async create(guildId, name, content, createdBy) {
+        try {
+            return await prisma.cannedResponse.create({
+                data: {
+                    guildId,
+                    name: name.toLowerCase(),
+                    content,
+                    createdBy,
+                }
+            });
+        } catch (error) {
+            logger.error('CannedResponse create hatası:', error);
+            throw error;
+        }
+    },
+
+    // Hazır yanıt getir
+    async get(guildId, name) {
+        try {
+            return await prisma.cannedResponse.findUnique({
+                where: {
+                    guildId_name: {
+                        guildId,
+                        name: name.toLowerCase(),
+                    }
+                }
+            });
+        } catch (error) {
+            logger.error('CannedResponse get hatası:', error);
+            return null;
+        }
+    },
+
+    // Tüm hazır yanıtları getir
+    async getAll(guildId) {
+        try {
+            return await prisma.cannedResponse.findMany({
+                where: { guildId },
+                orderBy: { useCount: 'desc' }
+            });
+        } catch (error) {
+            logger.error('CannedResponse getAll hatası:', error);
+            throw error;
+        }
+    },
+
+    // Hazır yanıt güncelle
+    async update(guildId, name, data) {
+        try {
+            return await prisma.cannedResponse.update({
+                where: {
+                    guildId_name: {
+                        guildId,
+                        name: name.toLowerCase(),
+                    }
+                },
+                data,
+            });
+        } catch (error) {
+            logger.error('CannedResponse update hatası:', error);
+            throw error;
+        }
+    },
+
+    // Kullanım sayısını artır
+    async incrementUse(guildId, name) {
+        try {
+            return await prisma.cannedResponse.update({
+                where: {
+                    guildId_name: {
+                        guildId,
+                        name: name.toLowerCase(),
+                    }
+                },
+                data: { useCount: { increment: 1 } }
+            });
+        } catch (error) {
+            logger.error('CannedResponse incrementUse hatası:', error);
+        }
+    },
+
+    // Hazır yanıt sil
+    async delete(guildId, name) {
+        try {
+            return await prisma.cannedResponse.delete({
+                where: {
+                    guildId_name: {
+                        guildId,
+                        name: name.toLowerCase(),
+                    }
+                }
+            });
+        } catch (error) {
+            logger.error('CannedResponse delete hatası:', error);
+            throw error;
+        }
+    },
+};
+
+// ==================== STATS FUNCTIONS ====================
+export const statsDB = {
+    // Guild istatistiklerini getir
+    async get(guildId) {
+        try {
+            return await prisma.guildStats.findUnique({
+                where: { guildId }
+            });
+        } catch (error) {
+            logger.error('Stats get hatası:', error);
+            throw error;
+        }
+    },
+
+    // Ortalama değerlendirmeyi güncelle
+    async updateAverageRating(guildId) {
+        try {
+            const result = await prisma.ticket.aggregate({
+                where: { guildId, rating: { not: null } },
+                _avg: { rating: true }
+            });
+
+            return await prisma.guildStats.update({
+                where: { guildId },
+                data: { averageRating: result._avg.rating }
+            });
+        } catch (error) {
+            logger.error('updateAverageRating hatası:', error);
+        }
+    },
+
+    // Detaylı istatistikler
+    async getDetailed(guildId) {
+        try {
+            const stats = await prisma.guildStats.findUnique({
+                where: { guildId }
+            });
+
+            // Bugün açılan ticketlar
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            const todayTickets = await prisma.ticket.count({
+                where: {
+                    guildId,
+                    createdAt: { gte: today }
+                }
+            });
+
+            // Bu hafta açılan ticketlar
+            const weekAgo = new Date();
+            weekAgo.setDate(weekAgo.getDate() - 7);
+
+            const weekTickets = await prisma.ticket.count({
+                where: {
+                    guildId,
+                    createdAt: { gte: weekAgo }
+                }
+            });
+
+            // Kategoriye göre dağılım
+            const categoryStats = await prisma.ticket.groupBy({
+                by: ['categoryId'],
+                where: { guildId },
+                _count: { id: true }
+            });
+
+            // En aktif yetkililer
+            const topStaff = await prisma.ticket.groupBy({
+                by: ['claimedBy'],
+                where: { guildId, claimedBy: { not: null } },
+                _count: { id: true },
+                orderBy: { _count: { id: 'desc' } },
+                take: 5
+            });
+
+            return {
+                ...stats,
+                todayTickets,
+                weekTickets,
+                categoryStats,
+                topStaff,
+            };
+        } catch (error) {
+            logger.error('getDetailed hatası:', error);
             throw error;
         }
     },

@@ -1,24 +1,30 @@
 {
-  "name": "discord-ticket-bot",
-  "version": "1.0.0",
-  "description": "Comprehensive Discord Ticket Bot with advanced features",
+  "name": "flux-ticket",
+  "version": "2.0.0",
+  "description": "Professional Discord Ticket Bot with advanced features",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
-    "start": "node --no-warnings src/index.js",
-    "dev": "nodemon --no-warnings src/index.js",
-    "deploy": "node --no-warnings src/deploy-commands.js",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:studio": "prisma studio"
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "deploy": "node src/deploy-commands.js",
+    "deploy:global": "node src/deploy-commands.js",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio",
+    "db:reset": "prisma migrate reset",
+    "lint": "eslint src/",
+    "format": "prettier --write src/"
   },
   "keywords": [
     "discord",
     "bot",
     "ticket",
-    "support"
+    "support",
+    "discord.js"
   ],
-  "author": "Your Name",
+  "author": "FluX",
   "license": "MIT",
   "dependencies": {
     "@prisma/client": "^5.9.1",
@@ -28,7 +34,11 @@
     "winston": "^3.11.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.3",
-    "prisma": "^5.9.1"
+    "prisma": "^5.9.1",
+    "eslint": "^8.56.0",
+    "prettier": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

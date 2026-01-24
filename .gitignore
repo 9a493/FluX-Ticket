@@ -1,13 +1,35 @@
+# Dependencies
 node_modules/
+
+# Environment
 .env
-*.log
-.DS_Store
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.db-journal
 prisma/migrations/
-dist/
-build/
+
+# Logs
+logs/*.log
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-package-lock.json
-yarn.lock
+
+# Build
+dist/
+build/
+
+# Misc
+*.zip
+*.tar.gz
