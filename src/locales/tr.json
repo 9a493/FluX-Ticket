@@ -1,0 +1,47 @@
+{
+    "locale": "tr",
+    "name": "Türkçe",
+    "common": {
+        "yes": "Evet",
+        "no": "Hayır",
+        "cancel": "İptal",
+        "confirm": "Onayla",
+        "error": "Hata",
+        "success": "Başarılı",
+        "loading": "Yükleniyor...",
+        "notFound": "Bulunamadı",
+        "noPermission": "Bu işlem için yetkiniz yok!"
+    },
+    "ticket": {
+        "created": "✅ Ticketınız oluşturuldu: {channel}",
+        "createdTitle": "🎫 Ticket #{number}",
+        "alreadyHaveTicket": "❌ Zaten açık bir ticketınız var: {channel}",
+        "blacklisted": "❌ Ticket sistemi kullanma yetkiniz engellenmiş.",
+        "selectCategory": "📋 Lütfen ticket kategorisi seçin:",
+        "closeTitle": "⚠️ Ticketı Kapat",
+        "closedTitle": "🔒 Ticket Kapatıldı",
+        "claimedTitle": "✅ Ticket Sahiplenildi",
+        "unclaimedTitle": "🔓 Ticket Serbest Bırakıldı"
+    },
+    "rating": {
+        "title": "⭐ Değerlendirme",
+        "description": "Destek deneyiminizi değerlendirin!",
+        "skip": "Değerlendirme Yapma",
+        "thanks": "✅ Teşekkürler!"
+    },
+    "panel": {
+        "title": "🎫 Destek Ticket Sistemi",
+        "button": "Ticket Oluştur"
+    },
+    "priority": {
+        "1": "🟢 Düşük",
+        "2": "🟡 Orta",
+        "3": "🟠 Yüksek",
+        "4": "🔴 Acil"
+    },
+    "status": {
+        "open": "🟢 Açık",
+        "claimed": "🟡 Sahiplenildi",
+        "closed": "🔴 Kapalı"
+    }
+}

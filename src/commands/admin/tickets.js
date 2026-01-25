@@ -2,36 +2,43 @@ import { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } from 'discord.
 import { ticketDB, guildDB } from '../../utils/database.js';
 import logger from '../../utils/logger.js';
 
-const PRIORITIES = {
-    1: { name: 'Düşük', emoji: '🟢' },
-    2: { name: 'Orta', emoji: '🟡' },
-    3: { name: 'Yüksek', emoji: '🟠' },
-    4: { name: 'Acil', emoji: '🔴' },
-};
+const PRIORITY_EMOJIS = { 1: '🟢', 2: '🟡', 3: '🟠', 4: '🔴' };
+const STATUS_EMOJIS = { 'open': '🟢', 'claimed': '🟡', 'closed': '🔴', 'archived': '📦' };
 
 export default {
     data: new SlashCommandBuilder()
         .setName('tickets')
         .setDescription('Açık ticketları listeler')
         .addStringOption(option =>
-            option.setName('filtre')
-                .setDescription('Filtreleme seçeneği')
+            option.setName('durum')
+                .setDescription('Filtrele')
                 .setRequired(false)
                 .addChoices(
-                    { name: '🟢 Tümü', value: 'all' },
-                    { name: '📭 Sahipsiz', value: 'unclaimed' },
-                    { name: '📬 Sahipli', value: 'claimed' },
-                    { name: '🔴 Acil', value: 'urgent' },
-                    { name: '👤 Benim', value: 'mine' },
+                    { name: '🟢 Açık', value: 'open' },
+                    { name: '🟡 Sahiplenilmiş', value: 'claimed' },
+                    { name: '🔴 Kapalı', value: 'closed' },
+                    { name: '📦 Arşivlenmiş', value: 'archived' },
+                    { name: '📋 Tümü', value: 'all' },
                 )
         )
-        .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+        .addUserOption(option =>
+            option.setName('kullanıcı')
+                .setDescription('Belirli bir kullanıcının ticketları')
+                .setRequired(false)
+        )
+        .addUserOption(option =>
+            option.setName('yetkili')
+                .setDescription('Belirli bir yetkilinin sahiplendiği ticketlar')
+                .setRequired(false)
+        )
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
 
     async execute(interaction) {
         await interaction.deferReply({ ephemeral: true });
 
-        const filter = interaction.options.getString('filtre') || 'all';
-        const member = interaction.member;
+        const status = interaction.options.getString('durum') || 'open';
+        const filterUser = interaction.options.getUser('kullanıcı');
+        const filterStaff = interaction.options.getUser('yetkili');
 
         try {
             // Yetkili kontrolü
@@ -40,119 +47,89 @@ export default {
                 ? guildConfig.staffRoles.split(',').filter(r => r)
                 : [];
             
-            const isStaff = staffRoles.some(roleId => member.roles.cache.has(roleId));
-            if (!isStaff && !member.permissions.has('Administrator')) {
+            const isStaff = staffRoles.some(roleId => interaction.member.roles.cache.has(roleId));
+            if (!isStaff && !interaction.member.permissions.has('Administrator')) {
                 return interaction.editReply({
                     content: '❌ Bu komutu kullanmak için yetkili olmalısınız!',
                 });
             }
 
-            // Açık ticketları getir
-            let tickets = await ticketDB.getOpenTickets(interaction.guild.id);
+            // Ticketları getir
+            let tickets;
+            if (status === 'all') {
+                tickets = await ticketDB.getAllTickets(interaction.guild.id);
+            } else {
+                tickets = await ticketDB.getTicketsByStatus(interaction.guild.id, status);
+            }
 
-            // Filtreleme
-            switch (filter) {
-                case 'unclaimed':
-                    tickets = tickets.filter(t => t.status === 'open');
-                    break;
-                case 'claimed':
-                    tickets = tickets.filter(t => t.status === 'claimed');
-                    break;
-                case 'urgent':
-                    tickets = tickets.filter(t => t.priority === 4);
-                    break;
-                case 'mine':
-                    tickets = tickets.filter(t => t.claimedBy === interaction.user.id);
-                    break;
+            // Filtrele
+            if (filterUser) {
+                tickets = tickets.filter(t => t.userId === filterUser.id);
+            }
+            if (filterStaff) {
+                tickets = tickets.filter(t => t.claimedBy === filterStaff.id);
             }
 
             if (tickets.length === 0) {
-                const filterNames = {
-                    all: 'açık',
-                    unclaimed: 'sahipsiz',
-                    claimed: 'sahipli',
-                    urgent: 'acil',
-                    mine: 'size ait',
-                };
-
                 return interaction.editReply({
-                    content: `📋 Hiç ${filterNames[filter]} ticket bulunamadı.`,
+                    content: '📋 Belirtilen kriterlere uygun ticket bulunamadı.',
                 });
             }
 
-            // Önceliğe göre sırala (acil olanlar önce)
-            tickets.sort((a, b) => (b.priority || 1) - (a.priority || 1));
+            // Sayfalama için ticketları böl (max 10 per embed)
+            const maxPerPage = 10;
+            const totalPages = Math.ceil(tickets.length / maxPerPage);
+            const page = 1;
 
-            // Ticket listesi oluştur
-            const ticketList = await Promise.all(tickets.slice(0, 25).map(async (ticket) => {
-                const priority = PRIORITIES[ticket.priority || 1];
-                const status = ticket.status === 'claimed' ? '📬' : '📭';
-                const channelLink = `<#${ticket.channelId}>`;
-                
-                let ownerInfo = '';
-                try {
-                    const owner = await interaction.client.users.fetch(ticket.userId);
-                    ownerInfo = owner.username;
-                } catch {
-                    ownerInfo = 'Bilinmiyor';
-                }
-
-                let claimedInfo = '';
-                if (ticket.claimedBy) {
-                    try {
-                        const claimer = await interaction.client.users.fetch(ticket.claimedBy);
-                        claimedInfo = ` → ${claimer.username}`;
-                    } catch {
-                        claimedInfo = ' → Bilinmiyor';
-                    }
-                }
-
-                const timeSinceCreation = formatTimeAgo(new Date(ticket.createdAt));
-
-                return `${status} ${priority.emoji} **#${ticket.ticketNumber.toString().padStart(4, '0')}** - ${channelLink}\n` +
-                       `   └ 👤 ${ownerInfo}${claimedInfo} • ⏱️ ${timeSinceCreation}`;
-            }));
+            const startIndex = (page - 1) * maxPerPage;
+            const pageTickets = tickets.slice(startIndex, startIndex + maxPerPage);
 
             // Embed oluştur
-            const filterEmojis = {
-                all: '📋',
-                unclaimed: '📭',
-                claimed: '📬',
-                urgent: '🔴',
-                mine: '👤',
-            };
-
-            const filterNames = {
-                all: 'Tüm Açık',
-                unclaimed: 'Sahipsiz',
-                claimed: 'Sahipli',
-                urgent: 'Acil',
-                mine: 'Benim',
-            };
-
             const embed = new EmbedBuilder()
                 .setColor('#5865F2')
-                .setTitle(`${filterEmojis[filter]} ${filterNames[filter]} Ticketlar`)
-                .setDescription(ticketList.join('\n\n'))
-                .setFooter({ 
-                    text: `Toplam ${tickets.length} ticket${tickets.length > 25 ? ' (ilk 25 gösteriliyor)' : ''}`
-                })
+                .setTitle(`📋 Ticket Listesi`)
+                .setDescription(
+                    pageTickets.map((t, i) => {
+                        const num = t.ticketNumber.toString().padStart(4, '0');
+                        const statusEmoji = STATUS_EMOJIS[t.status] || '❓';
+                        const priorityEmoji = PRIORITY_EMOJIS[t.priority] || '';
+                        const claimed = t.claimedBy ? `→ <@${t.claimedBy}>` : '';
+                        const age = getAge(new Date(t.createdAt));
+                        
+                        return `${statusEmoji} **#${num}** ${priorityEmoji} <@${t.userId}> ${claimed} • \`${age}\``;
+                    }).join('\n')
+                )
+                .addFields(
+                    { name: '📊 Özet', value: `Toplam: **${tickets.length}** ticket`, inline: true },
+                )
+                .setFooter({ text: `Sayfa ${page}/${totalPages} • ${interaction.guild.name}` })
                 .setTimestamp();
 
-            // Özet ekle
-            const unclaimed = tickets.filter(t => t.status === 'open').length;
-            const claimed = tickets.filter(t => t.status === 'claimed').length;
-            const urgent = tickets.filter(t => t.priority === 4).length;
+            // Durum dağılımı
+            const openCount = tickets.filter(t => t.status === 'open').length;
+            const claimedCount = tickets.filter(t => t.status === 'claimed').length;
+            const closedCount = tickets.filter(t => t.status === 'closed').length;
+            const archivedCount = tickets.filter(t => t.status === 'archived').length;
 
             embed.addFields({
-                name: '📊 Özet',
-                value: `📭 Sahipsiz: **${unclaimed}** | 📬 Sahipli: **${claimed}** | 🔴 Acil: **${urgent}**`,
-                inline: false
+                name: '📈 Durum Dağılımı',
+                value: `🟢 Açık: ${openCount} • 🟡 Sahiplenilmiş: ${claimedCount} • 🔴 Kapalı: ${closedCount} • 📦 Arşiv: ${archivedCount}`,
+                inline: false,
             });
+
+            // Yüksek öncelikli
+            const highPriority = tickets.filter(t => t.priority >= 3 && (t.status === 'open' || t.status === 'claimed')).length;
+            if (highPriority > 0) {
+                embed.addFields({
+                    name: '⚠️ Yüksek Öncelikli',
+                    value: `${highPriority} ticket yüksek/acil öncelikte!`,
+                    inline: true,
+                });
+            }
 
             await interaction.editReply({ embeds: [embed] });
 
-            logger.info(`Tickets listed by ${interaction.user.tag} (filter: ${filter})`);
+            logger.info(`Tickets list viewed by ${interaction.user.tag}`);
 
         } catch (error) {
             logger.error('Tickets command hatası:', error);
@@ -163,19 +140,13 @@ export default {
     },
 };
 
-/**
- * Zaman farkını formatlar
- */
-function formatTimeAgo(date) {
-    const now = new Date();
-    const diff = now - date;
-    
-    const minutes = Math.floor(diff / 60000);
+function getAge(date) {
+    const ms = Date.now() - date.getTime();
+    const minutes = Math.floor(ms / 60000);
     const hours = Math.floor(minutes / 60);
     const days = Math.floor(hours / 24);
 
-    if (days > 0) return `${days}g önce`;
-    if (hours > 0) return `${hours}s önce`;
-    if (minutes > 0) return `${minutes}dk önce`;
-    return 'Şimdi';
+    if (days > 0) return `${days}g`;
+    if (hours > 0) return `${hours}s`;
+    return `${minutes}d`;
 }

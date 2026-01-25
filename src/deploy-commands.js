@@ -57,7 +57,7 @@ async function deployCommands() {
         // Development modunda sadece belirli bir sunucuya kaydet (anında aktif)
         if (process.env.GUILD_ID) {
             const data = await rest.put(
-                Routes.applicationGuildCommands(process.env.CLIENT_ID),
+                Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
                 { body: commands }
             );
             console.log(`✅ ${data.length} komut test sunucusuna kaydedildi!`);

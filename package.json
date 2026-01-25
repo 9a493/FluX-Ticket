@@ -1,44 +1,33 @@
 {
-  "name": "flux-ticket",
-  "version": "2.0.0",
-  "description": "Professional Discord Ticket Bot with advanced features",
-  "main": "src/index.js",
-  "type": "module",
-  "scripts": {
-    "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
-    "deploy": "node src/deploy-commands.js",
-    "deploy:global": "node src/deploy-commands.js",
-    "db:generate": "prisma generate",
-    "db:push": "prisma db push",
-    "db:migrate": "prisma migrate dev",
-    "db:studio": "prisma studio",
-    "db:reset": "prisma migrate reset",
-    "lint": "eslint src/",
-    "format": "prettier --write src/"
-  },
-  "keywords": [
-    "discord",
-    "bot",
-    "ticket",
-    "support",
-    "discord.js"
-  ],
-  "author": "FluX",
-  "license": "MIT",
-  "dependencies": {
-    "@prisma/client": "^5.9.1",
-    "discord.js": "^14.14.1",
-    "dotenv": "^16.4.1",
-    "express": "^4.22.1",
-    "winston": "^3.11.0"
-  },
-  "devDependencies": {
-    "prisma": "^5.9.1",
-    "eslint": "^8.56.0",
-    "prettier": "^3.2.4"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  }
+    "name": "flux-ticket-bot",
+    "version": "2.0.0",
+    "description": "Advanced Discord Ticket Bot with Discord.js v14, Prisma ORM, REST API, Dashboard and many features",
+    "main": "src/index.js",
+    "type": "module",
+    "scripts": {
+        "start": "node src/index.js",
+        "dev": "node --watch src/index.js",
+        "deploy": "node src/deploy-commands.js",
+        "deploy:global": "node src/deploy-commands.js --global",
+        "db:push": "prisma db push",
+        "db:migrate": "prisma migrate dev",
+        "db:studio": "prisma studio",
+        "db:generate": "prisma generate"
+    },
+    "keywords": ["discord", "discord.js", "ticket", "bot", "support", "prisma", "api", "dashboard"],
+    "author": "FluX Team",
+    "license": "MIT",
+    "dependencies": {
+        "@prisma/client": "^5.9.1",
+        "discord.js": "^14.14.1",
+        "dotenv": "^16.4.1",
+        "express": "^4.18.2",
+        "winston": "^3.11.0"
+    },
+    "devDependencies": {
+        "prisma": "^5.9.1"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    }
 }

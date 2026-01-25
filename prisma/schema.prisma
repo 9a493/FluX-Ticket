@@ -1,4 +1,4 @@
-// Prisma Schema for FluX Ticket Bot
+// Prisma Schema for FluX Ticket Bot v2.0
 // Supports: SQLite (development) and PostgreSQL (production)
 
 generator client {
@@ -6,169 +6,184 @@ generator client {
 }
 
 datasource db {
-    provider = "sqlite" // Change to "postgresql" for production
+    provider = "sqlite"
     url      = env("DATABASE_URL")
 }
 
 // ==================== GUILD MODEL ====================
 model Guild {
-    id                 String    @id // Discord Guild ID
-    name               String
+    id                   String    @id
+    name                 String
     
     // Ticket Settings
-    categoryId         String?   // Discord Category ID for tickets
-    panelChannelId     String?   // Channel where ticket panel is sent
-    panelMessageId     String?   // The panel message ID
-    logChannelId       String?   // Channel for ticket logs
-    staffRoles         String?   // Comma-separated role IDs
-    ticketCount        Int       @default(0) // Auto-increment ticket number
+    categoryId           String?
+    panelChannelId       String?
+    panelMessageId       String?
+    logChannelId         String?
+    staffRoles           String?
+    ticketCount          Int       @default(0)
     
-    // Optional Settings
-    maxTicketsPerUser  Int       @default(3)
-    autoCloseHours     Int       @default(48)
-    welcomeMessage     String?   // Custom welcome message
-    closeMessage       String?   // Custom close message
+    // Advanced Settings
+    maxTicketsPerUser    Int       @default(3)
+    autoCloseHours       Int       @default(48)
+    welcomeMessage       String?
+    closeMessage         String?
+    locale               String    @default("tr")
+    
+    // Notifications
+    dmNotifications      Boolean   @default(true)
+    dmOnStaffReply       Boolean   @default(false)
+    webhookUrl           String?
     
     // Relations
-    tickets            Ticket[]
-    categories         Category[]
-    cannedResponses    CannedResponse[]
-    stats              GuildStats?
+    tickets              Ticket[]
+    categories           Category[]
+    cannedResponses      CannedResponse[]
+    stats                GuildStats?
     
     // Timestamps
-    createdAt          DateTime  @default(now())
-    updatedAt          DateTime  @updatedAt
+    createdAt            DateTime  @default(now())
+    updatedAt            DateTime  @updatedAt
 }
 
 // ==================== CATEGORY MODEL ====================
 model Category {
-    id                 String    @id @default(cuid())
-    guildId            String
-    guild              Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
+    id                   String    @id @default(cuid())
+    guildId              String
+    guild                Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
     
-    // Category Info
-    name               String
-    description        String?
-    emoji              String?   @default("🎫")
-    color              String?   @default("#5865F2")
+    name                 String
+    description          String?
+    emoji                String?   @default("🎫")
+    color                String?   @default("#5865F2")
     
-    // Discord Integration
-    discordCategoryId  String?   // Separate Discord category for this type
-    staffRoles         String?   // Category-specific staff roles (comma-separated)
+    discordCategoryId    String?
+    staffRoles           String?
     
-    // Settings
-    enabled            Boolean   @default(true)
-    order              Int       @default(0)
+    enabled              Boolean   @default(true)
+    order                Int       @default(0)
     
-    // Relations
-    tickets            Ticket[]
+    tickets              Ticket[]
     
-    // Timestamps
-    createdAt          DateTime  @default(now())
-    updatedAt          DateTime  @updatedAt
+    createdAt            DateTime  @default(now())
+    updatedAt            DateTime  @updatedAt
     
     @@unique([guildId, name])
 }
 
 // ==================== TICKET MODEL ====================
 model Ticket {
-    id                 String    @id @default(cuid())
-    ticketNumber       Int       // Guild-specific ticket number
-    channelId          String    @unique // Discord Channel ID
+    id                   String    @id @default(cuid())
+    ticketNumber         Int
+    channelId            String    @unique
     
-    // Relations
-    guildId            String
-    guild              Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
-    categoryId         String?
-    category           Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+    guildId              String
+    guild                Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
+    categoryId           String?
+    category             Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
     
-    // User Info
-    userId             String    // Ticket creator's Discord ID
+    userId               String
+    subject              String?
+    description          String?
     
-    // Ticket Status
-    status             String    @default("open") // open, claimed, closed
-    priority           Int       @default(1) // 1-4 (low, medium, high, urgent)
-    tags               String?   // Comma-separated tags
+    status               String    @default("open")
+    priority             Int       @default(1)
+    tags                 String?
     
-    // Staff Info
-    claimedBy          String?   // Staff member who claimed
-    claimedAt          DateTime?
-    closedBy           String?   // Who closed the ticket
-    closeReason        String?
-    closedAt           DateTime?
+    claimedBy            String?
+    claimedAt            DateTime?
+    closedBy             String?
+    closeReason          String?
+    closedAt             DateTime?
+    
+    // Scheduled Close
+    scheduledCloseAt     DateTime?
+    scheduledCloseBy     String?
+    scheduledCloseReason String?
     
     // Metrics
-    messageCount       Int       @default(0)
-    rating             Int?      // 1-5 star rating
-    transcriptUrl      String?   // URL to transcript file
+    messageCount         Int       @default(0)
+    rating               Int?
+    transcriptUrl        String?
     
-    // Activity Tracking
-    lastActivity       DateTime  @default(now())
+    lastActivity         DateTime  @default(now())
     
-    // Timestamps
-    createdAt          DateTime  @default(now())
-    updatedAt          DateTime  @updatedAt
+    createdAt            DateTime  @default(now())
+    updatedAt            DateTime  @updatedAt
     
     @@index([guildId, status])
     @@index([guildId, userId])
     @@index([lastActivity])
+    @@index([scheduledCloseAt])
 }
 
 // ==================== USER MODEL ====================
 model User {
-    id                 String    @id // Discord User ID
-    username           String
+    id                   String    @id
+    username             String
     
-    // Blacklist
-    blacklisted        Boolean   @default(false)
-    blacklistReason    String?
+    blacklisted          Boolean   @default(false)
+    blacklistReason      String?
     
-    // Stats
-    totalTickets       Int       @default(0)
+    totalTickets         Int       @default(0)
     
-    // Timestamps
-    createdAt          DateTime  @default(now())
-    updatedAt          DateTime  @updatedAt
+    createdAt            DateTime  @default(now())
+    updatedAt            DateTime  @updatedAt
 }
 
 // ==================== GUILD STATS MODEL ====================
 model GuildStats {
-    id                 String    @id @default(cuid())
-    guildId            String    @unique
-    guild              Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
+    id                   String    @id @default(cuid())
+    guildId              String    @unique
+    guild                Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
     
-    // Ticket Counts
-    totalTickets       Int       @default(0)
-    openTickets        Int       @default(0)
-    closedTickets      Int       @default(0)
+    totalTickets         Int       @default(0)
+    openTickets          Int       @default(0)
+    closedTickets        Int       @default(0)
     
-    // Performance Metrics
-    averageResponseTime Float?   // In minutes
-    averageCloseTime    Float?   // In minutes
-    averageRating       Float?   // 1-5
+    averageResponseTime  Float?
+    averageCloseTime     Float?
+    averageRating        Float?
     
-    // Timestamps
-    createdAt          DateTime  @default(now())
-    updatedAt          DateTime  @updatedAt
+    createdAt            DateTime  @default(now())
+    updatedAt            DateTime  @updatedAt
 }
 
 // ==================== CANNED RESPONSE MODEL ====================
 model CannedResponse {
-    id                 String    @id @default(cuid())
-    guildId            String
-    guild              Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
+    id                   String    @id @default(cuid())
+    guildId              String
+    guild                Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
     
-    // Response Info
-    name               String    // Short identifier
-    content            String    // The actual response text
+    name                 String
+    content              String
     
-    // Metadata
-    createdBy          String    // Discord User ID
-    useCount           Int       @default(0)
+    createdBy            String
+    useCount             Int       @default(0)
     
-    // Timestamps
-    createdAt          DateTime  @default(now())
-    updatedAt          DateTime  @updatedAt
+    createdAt            DateTime  @default(now())
+    updatedAt            DateTime  @updatedAt
     
     @@unique([guildId, name])
+}
+
+// ==================== API KEY MODEL ====================
+model ApiKey {
+    id                   String    @id @default(cuid())
+    guildId              String
+    
+    key                  String    @unique
+    name                 String
+    permissions          String    @default("read")
+    
+    lastUsed             DateTime?
+    usageCount           Int       @default(0)
+    
+    enabled              Boolean   @default(true)
+    expiresAt            DateTime?
+    
+    createdAt            DateTime  @default(now())
+    updatedAt            DateTime  @updatedAt
+    
+    @@index([guildId])
 }

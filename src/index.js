@@ -7,6 +7,7 @@ import logger from './utils/logger.js';
 import { testDatabaseConnection, disconnectDatabase } from './utils/database.js';
 import { startHealthServer } from './server.js';
 import { startAutoClose } from './utils/autoClose.js';
+import { loadScheduledCloses } from './utils/scheduler.js';
 
 // ES modules için __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -31,6 +32,9 @@ const client = new Client({
         Partials.GuildMember,
     ],
 });
+
+// Global client referansı (scheduler için)
+global.discordClient = client;
 
 // Collections
 client.commands = new Collection();
@@ -94,6 +98,8 @@ async function loadEvents() {
 async function main() {
     try {
         logger.info('🚀 Bot başlatılıyor...');
+        logger.info(`📍 Node.js: ${process.version}`);
+        logger.info(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
 
         // Database bağlantısını test et
         const dbConnected = await testDatabaseConnection();
@@ -108,15 +114,21 @@ async function main() {
         // Eventleri yükle
         await loadEvents();
 
-        // Health check server başlat (Render için)
+        // Health check & API server başlat
         startHealthServer();
 
         // Discord'a bağlan
         await client.login(process.env.TOKEN);
 
-        // Auto-close sistemini başlat (client hazır olduktan sonra)
-        client.once('ready', () => {
+        // Client hazır olduktan sonra
+        client.once('ready', async () => {
+            // Auto-close sistemini başlat
             startAutoClose(client);
+            
+            // Zamanlanmış kapatmaları yükle
+            await loadScheduledCloses();
+            
+            logger.info('🎉 Tüm sistemler hazır!');
         });
 
     } catch (error) {

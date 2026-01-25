@@ -1,0 +1,47 @@
+{
+    "locale": "en",
+    "name": "English",
+    "common": {
+        "yes": "Yes",
+        "no": "No",
+        "cancel": "Cancel",
+        "confirm": "Confirm",
+        "error": "Error",
+        "success": "Success",
+        "loading": "Loading...",
+        "notFound": "Not found",
+        "noPermission": "You don't have permission for this action!"
+    },
+    "ticket": {
+        "created": "✅ Your ticket has been created: {channel}",
+        "createdTitle": "🎫 Ticket #{number}",
+        "alreadyHaveTicket": "❌ You already have an open ticket: {channel}",
+        "blacklisted": "❌ You are blacklisted from using the ticket system.",
+        "selectCategory": "📋 Please select a ticket category:",
+        "closeTitle": "⚠️ Close Ticket",
+        "closedTitle": "🔒 Ticket Closed",
+        "claimedTitle": "✅ Ticket Claimed",
+        "unclaimedTitle": "🔓 Ticket Released"
+    },
+    "rating": {
+        "title": "⭐ Rating",
+        "description": "Rate your support experience!",
+        "skip": "Skip Rating",
+        "thanks": "✅ Thank you!"
+    },
+    "panel": {
+        "title": "🎫 Support Ticket System",
+        "button": "Create Ticket"
+    },
+    "priority": {
+        "1": "🟢 Low",
+        "2": "🟡 Medium",
+        "3": "🟠 High",
+        "4": "🔴 Urgent"
+    },
+    "status": {
+        "open": "🟢 Open",
+        "claimed": "🟡 Claimed",
+        "closed": "🔴 Closed"
+    }
+}

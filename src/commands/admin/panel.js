@@ -1,5 +1,5 @@
 import { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ChannelType } from 'discord.js';
-import { guildDB, categoryDB } from '../../utils/database.js';
+import { guildDB } from '../../utils/database.js';
 import logger from '../../utils/logger.js';
 
 export default {
@@ -8,7 +8,7 @@ export default {
         .setDescription('Ticket paneli gönderir')
         .addChannelOption(option =>
             option.setName('kanal')
-                .setDescription('Panel gönderilecek kanal (boş bırakılırsa bu kanal)')
+                .setDescription('Panel gönderilecek kanal')
                 .setRequired(false)
                 .addChannelTypes(ChannelType.GuildText)
         )
@@ -26,7 +26,18 @@ export default {
         )
         .addStringOption(option =>
             option.setName('renk')
-                .setDescription('Embed rengi (hex: #5865F2)')
+                .setDescription('Embed rengi (hex)')
+                .setRequired(false)
+        )
+        .addStringOption(option =>
+            option.setName('buton')
+                .setDescription('Buton metni')
+                .setRequired(false)
+                .setMaxLength(50)
+        )
+        .addBooleanOption(option =>
+            option.setName('modal')
+                .setDescription('Ticket açarken modal formu göster?')
                 .setRequired(false)
         )
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
@@ -34,17 +45,19 @@ export default {
     async execute(interaction) {
         await interaction.deferReply({ ephemeral: true });
 
-        const channel = interaction.options.getChannel('kanal') || interaction.channel;
-        const title = interaction.options.getString('başlık') || '🎫 Destek Ticket Sistemi';
-        const description = interaction.options.getString('açıklama');
-        const color = interaction.options.getString('renk') || '#5865F2';
+        const targetChannel = interaction.options.getChannel('kanal') || interaction.channel;
+        const customTitle = interaction.options.getString('başlık');
+        const customDescription = interaction.options.getString('açıklama');
+        const customColor = interaction.options.getString('renk');
+        const customButton = interaction.options.getString('buton');
+        const useModal = interaction.options.getBoolean('modal') ?? true;
 
         try {
             const guildConfig = await guildDB.getOrCreate(interaction.guild.id, interaction.guild.name);
-            const categories = await categoryDB.getAll(interaction.guild.id);
 
-            // Varsayılan açıklama
-            const defaultDescription = 
+            // Varsayılan değerler
+            const title = customTitle || '🎫 Destek Ticket Sistemi';
+            const description = customDescription || 
                 '**Nasıl ticket açarım?**\n' +
                 'Aşağıdaki butona tıklayarak yeni bir destek talebi oluşturabilirsiniz.\n\n' +
                 '**Ne zaman ticket açmalıyım?**\n' +
@@ -55,56 +68,60 @@ export default {
                 '• Gereksiz ticket açmayın\n' +
                 '• Yetkililere saygılı olun\n' +
                 '• Konunuzu açık ve net bir şekilde anlatın';
+            
+            const color = customColor?.replace('#', '') || '5865F2';
+            const buttonText = customButton || 'Ticket Oluştur';
 
             // Embed oluştur
             const embed = new EmbedBuilder()
-                .setColor(color)
+                .setColor(`#${color}`)
                 .setTitle(title)
-                .setDescription(description || defaultDescription)
-                .setThumbnail(interaction.guild.iconURL())
-                .setFooter({ text: `${interaction.guild.name} Destek Sistemi` })
+                .setDescription(description)
+                .setFooter({ text: interaction.guild.name, iconURL: interaction.guild.iconURL() })
                 .setTimestamp();
 
-            // Kategoriler varsa ekle
-            if (categories.length > 0) {
-                embed.addFields({
-                    name: '📁 Kategoriler',
-                    value: categories.map(c => `${c.emoji || '🎫'} **${c.name}**${c.description ? ` - ${c.description}` : ''}`).join('\n'),
-                    inline: false
-                });
+            // Thumbnail ekle (varsa)
+            if (interaction.guild.iconURL()) {
+                embed.setThumbnail(interaction.guild.iconURL({ size: 256 }));
             }
 
-            // Button oluştur
-            const button = new ButtonBuilder()
-                .setCustomId('create_ticket')
-                .setLabel('Ticket Oluştur')
-                .setEmoji('🎫')
-                .setStyle(ButtonStyle.Primary);
-
-            const row = new ActionRowBuilder().addComponents(button);
+            // Buton oluştur
+            const buttonId = useModal ? 'create_ticket_modal' : 'create_ticket';
+            
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(buttonId)
+                    .setLabel(buttonText)
+                    .setStyle(ButtonStyle.Primary)
+                    .setEmoji('🎫'),
+            );
 
             // Paneli gönder
-            const panelMessage = await channel.send({
+            const panelMessage = await targetChannel.send({
                 embeds: [embed],
                 components: [row],
             });
 
-            // Guild config güncelle
+            // Database'e kaydet
             await guildDB.update(interaction.guild.id, {
-                panelChannelId: channel.id,
+                panelChannelId: targetChannel.id,
                 panelMessageId: panelMessage.id,
             });
 
-            // Başarı mesajı
+            // Onay mesajı
             const successEmbed = new EmbedBuilder()
                 .setColor('#57F287')
                 .setTitle('✅ Panel Gönderildi')
-                .setDescription(`Ticket paneli ${channel} kanalına gönderildi.`)
+                .setDescription(`Ticket paneli ${targetChannel} kanalına gönderildi.`)
+                .addFields(
+                    { name: '📍 Kanal', value: `${targetChannel}`, inline: true },
+                    { name: '📝 Modal', value: useModal ? 'Açık' : 'Kapalı', inline: true },
+                )
                 .setTimestamp();
 
             await interaction.editReply({ embeds: [successEmbed] });
 
-            logger.info(`Ticket paneli gönderildi: ${channel.name} by ${interaction.user.tag}`);
+            logger.info(`Ticket panel sent to ${targetChannel.name} in ${interaction.guild.name}`);
 
         } catch (error) {
             logger.error('Panel command hatası:', error);

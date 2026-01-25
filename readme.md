@@ -1,63 +1,75 @@
 # 🎫 FluX Ticket Bot v2.0
 
-Modern ve özellik dolu Discord ticket botu. Discord.js v14, Prisma ORM ve birçok gelişmiş özellik ile.
+Modern, özellik dolu ve profesyonel Discord ticket botu. Discord.js v14, Prisma ORM, REST API ve Web Dashboard ile.
 
 ![Discord.js](https://img.shields.io/badge/discord.js-v14-blue)
 ![Node.js](https://img.shields.io/badge/node.js-v18+-green)
 ![Prisma](https://img.shields.io/badge/prisma-v5-purple)
 ![License](https://img.shields.io/badge/license-MIT-yellow)
 
+---
+
 ## ✨ Özellikler
 
-### 🎫 Ticket Sistemi
+### 🎫 Temel Ticket Sistemi
 - ✅ Slash command desteği
 - ✅ Buton ile ticket oluşturma
-- ✅ Çoklu kategori desteği
+- ✅ Modal form desteği (konu + açıklama)
 - ✅ Otomatik ticket numaralama (#0001, #0002...)
 - ✅ Ticket claim/unclaim sistemi
-- ✅ Öncelik seviyeleri (Düşük/Orta/Yüksek/Acil)
-- ✅ Etiket sistemi
 - ✅ Kullanıcı ekleme/çıkarma
-- ✅ Ticket transfer etme
-- ✅ Kategori değiştirme (move)
-- ✅ Kanal yeniden adlandırma
+
+### 📁 Çoklu Kategori
+- ✅ Sınırsız kategori oluşturma
+- ✅ Kategori bazlı yetkili rolleri
+- ✅ Özel emoji, renk, açıklama
+- ✅ Select menu ile kategori seçimi
 
 ### 📄 Transcript & Rating
-- ✅ HTML formatında transcript oluşturma
-- ✅ Kapanışta 1-5 yıldız değerlendirme
+- ✅ HTML formatında transcript
+- ✅ 1-5 yıldız değerlendirme sistemi
 - ✅ Transcript URL'si database'de saklanır
 
 ### 🤖 Otomasyon
-- ✅ Auto-close (48+ saat inaktif ticketlar)
-- ✅ İnaktivite uyarısı (24 saat önceden)
+- ✅ Auto-close (inaktif ticketlar)
+- ✅ Zamanlanmış kapatma (/scheduleclose)
 - ✅ Hazır yanıt sistemi (canned responses)
+- ✅ DM bildirimleri
 
 ### 📊 İstatistikler
 - ✅ Sunucu istatistikleri (/stats)
-- ✅ Yetkili performans istatistikleri (/mystats)
-- ✅ Kategori bazlı istatistikler
+- ✅ Yetkili performans (/mystats)
 - ✅ Top 5 aktif yetkili
+- ✅ Haftalık/günlük raporlar
 
 ### 🔒 Güvenlik
 - ✅ Blacklist sistemi
-- ✅ Kullanıcı başına ticket limiti
-- ✅ Yetki kontrolü (staff roles)
+- ✅ Ticket limiti (kullanıcı başına)
+- ✅ Yetki kontrolü
 - ✅ Cooldown sistemi
 
-### 🛠️ Teknik
-- ✅ Discord.js v14
-- ✅ Prisma ORM (SQLite/PostgreSQL)
-- ✅ Winston logging
-- ✅ ES Modules
-- ✅ Render deployment desteği
-- ✅ Health check endpoint
+### 🌍 Çoklu Dil (i18n)
+- ✅ Türkçe
+- ✅ English
+
+### 🌐 REST API
+- ✅ API Key authentication
+- ✅ CRUD endpoints
+- ✅ Rate limiting
+- ✅ Permission levels
+
+### 🖥️ Web Dashboard
+- ✅ React tabanlı SPA
+- ✅ İstatistik görüntüleme
+- ✅ Ticket listesi
+- ✅ Kategori yönetimi
 
 ---
 
 ## 📦 Kurulum
 
 ### Gereksinimler
-- Node.js v18 veya üzeri
+- Node.js v18+
 - npm veya yarn
 - Discord Bot Token
 
@@ -72,7 +84,7 @@ cd FluX-Ticket
 npm install
 ```
 
-### 3. Environment dosyasını oluştur
+### 3. Environment dosyası
 ```bash
 cp .env.example .env
 ```
@@ -81,77 +93,74 @@ cp .env.example .env
 ```env
 TOKEN=your_bot_token_here
 CLIENT_ID=your_client_id_here
-GUILD_ID=your_test_guild_id_here
+GUILD_ID=your_test_guild_id
 DATABASE_URL="file:./dev.db"
 NODE_ENV=development
+PORT=3000
 ```
 
-### 4. Database'i oluştur
+### 4. Database oluştur
 ```bash
 npx prisma db push
 npx prisma generate
 ```
 
-### 5. Komutları Discord'a kaydet
+### 5. Komutları kaydet
 ```bash
-# Test sunucusuna (hızlı)
-npm run deploy
-
-# Global (1 saat sürebilir)
-npm run deploy:global
+npm run deploy        # Test sunucusu
+npm run deploy:global # Global (1 saat sürebilir)
 ```
 
 ### 6. Botu başlat
 ```bash
-npm start
-
-# veya development modunda
-npm run dev
+npm start     # Production
+npm run dev   # Development (hot reload)
 ```
 
 ---
 
-## 🚀 Kullanım
+## 📋 Komutlar
 
-### İlk Kurulum
-1. Botu sunucunuza davet edin (Administrator yetkisi ile)
-2. `/setup` komutunu kullanın
-3. Ticket paneli otomatik oluşturulacak
-
-### Komutlar
-
-#### 🎫 Ticket Komutları
+### 🎫 Ticket Komutları
 | Komut | Açıklama |
 |-------|----------|
 | `/close [sebep]` | Ticketı kapatır |
 | `/claim` | Ticketı sahiplenir |
-| `/unclaim` | Ticket sahipliğini bırakır |
+| `/unclaim` | Sahipliği bırakır |
 | `/add @kullanıcı` | Kullanıcı ekler |
 | `/remove @kullanıcı` | Kullanıcı çıkarır |
 | `/rename <isim>` | Kanalı yeniden adlandırır |
-| `/transfer @yetkili` | Başka yetkiliye devreder |
+| `/transfer @yetkili` | Ticketı devreder |
 | `/move <kategori>` | Kategori değiştirir |
-| `/priority <seviye>` | Öncelik belirler |
+| `/priority <1-4>` | Öncelik belirler |
 | `/tag add/remove/list` | Etiket yönetimi |
-| `/info` | Ticket bilgilerini gösterir |
+| `/info` | Ticket bilgileri |
+| `/reopen` | Kapalı ticketı açar |
+| `/archive` | Arşivler (salt okunur) |
+| `/scheduleclose <süre>` | Zamanlanmış kapatma |
+| `/cancelclose` | Zamanlamayı iptal eder |
 
-#### 👮 Yetkili Komutları
+### 👮 Yetkili Komutları
 | Komut | Açıklama |
 |-------|----------|
-| `/canned add/remove/list/use` | Hazır yanıt yönetimi |
-| `/mystats` | Kişisel istatistikler |
+| `/canned add/remove/list/use` | Hazır yanıtlar |
+| `/mystats [@kullanıcı]` | Kişisel istatistikler |
+| `/tickets [durum]` | Ticket listesi |
 
-#### ⚙️ Yönetici Komutları
+### ⚙️ Yönetici Komutları
 | Komut | Açıklama |
 |-------|----------|
 | `/setup` | Bot kurulumu |
-| `/panel [kanal]` | Ticket paneli gönderir |
-| `/category add/remove/list` | Kategori yönetimi |
-| `/blacklist @kullanıcı` | Kullanıcıyı engeller |
-| `/unblacklist @kullanıcı` | Engeli kaldırır |
+| `/panel [kanal]` | Ticket paneli |
+| `/category add/remove/list/edit` | Kategori yönetimi |
+| `/blacklist @kullanıcı` | Kullanıcı engeller |
+| `/unblacklist @kullanıcı` | Engel kaldırır |
 | `/stats` | Sunucu istatistikleri |
+| `/settings view/...` | Ayar yönetimi |
+| `/language <dil>` | Dil değiştirir |
+| `/apikey create/list/delete` | API anahtarı |
 
-#### 🔧 Genel
+### 🔧 Genel
 | Komut | Açıklama |
 |-------|----------|
 | `/ping` | Bot gecikmesi |
@@ -159,76 +168,121 @@ npm run dev
 
 ---
 
-## 🗄️ Database Şeması
+## 🌐 REST API
 
+### Authentication
 ```
-Guild
-├── id (Discord Guild ID)
-├── categoryId (Discord Category)
-├── logChannelId
-├── staffRoles
-├── ticketCount
-├── categories[]
-├── tickets[]
-└── cannedResponses[]
+Authorization: Bearer ftk_xxxxxxxxxxxxx
+```
 
-Ticket
-├── id
-├── ticketNumber
-├── channelId
-├── userId
-├── status (open/claimed/closed)
-├── priority (1-4)
-├── tags
-├── claimedBy
-├── rating (1-5)
-└── transcriptUrl
+### Endpoints
 
-Category
-├── id
-├── name
-├── emoji
-├── description
-├── staffRoles
-└── enabled
+| Method | Endpoint | Açıklama |
+|--------|----------|----------|
+| GET | `/api/v1/guild` | Guild ayarları |
+| PUT | `/api/v1/guild` | Ayarları güncelle |
+| GET | `/api/v1/tickets` | Ticket listesi |
+| GET | `/api/v1/stats` | İstatistikler |
+| GET | `/api/v1/categories` | Kategoriler |
+| POST | `/api/v1/categories` | Kategori oluştur |
+| GET | `/api/v1/canned` | Hazır yanıtlar |
 
-CannedResponse
-├── id
-├── name
-├── content
-├── useCount
-└── createdBy
+### Örnek Kullanım
+```javascript
+const response = await fetch('http://localhost:3000/api/v1/tickets', {
+    headers: {
+        'Authorization': 'Bearer ftk_xxxxxxxxxxxxx'
+    }
+});
+const data = await response.json();
 ```
 
 ---
 
-## 🌐 Render Deployment
+## 🖥️ Web Dashboard
+
+Dashboard'u kullanmak için:
+
+1. `dashboard/index.html` dosyasını tarayıcıda açın
+2. API URL'sini girin (örn: `http://localhost:3000`)
+3. API anahtarınızı girin
+4. Bağlan!
+
+API anahtarı almak için Discord'da `/apikey create` komutunu kullanın.
+
+---
+
+## 📁 Dosya Yapısı
+
+```
+flux-ticket/
+├── dashboard/
+│   └── index.html          # Web Dashboard (SPA)
+├── prisma/
+│   └── schema.prisma       # Database şeması
+├── src/
+│   ├── commands/
+│   │   ├── admin/          # 9 komut
+│   │   ├── ticket/         # 17 komut
+│   │   └── utility/        # 3 komut
+│   ├── events/
+│   │   ├── interactionCreate.js
+│   │   ├── messageCreate.js
+│   │   └── ready.js
+│   ├── locales/
+│   │   ├── tr.json         # Türkçe
+│   │   └── en.json         # English
+│   ├── utils/
+│   │   ├── autoClose.js
+│   │   ├── database.js
+│   │   ├── i18n.js
+│   │   ├── logger.js
+│   │   ├── notifications.js
+│   │   ├── scheduler.js
+│   │   ├── ticketManager.js
+│   │   └── transcript.js
+│   ├── deploy-commands.js
+│   ├── index.js
+│   └── server.js           # Express API
+├── .env.example
+├── .gitignore
+├── package.json
+└── README.md
+```
+
+---
+
+## 🚀 Deployment (Render)
 
 1. Render.com'da yeni Web Service oluşturun
 2. GitHub reposunu bağlayın
-3. Environment variables ekleyin:
+3. Environment variables:
    - `TOKEN`
    - `CLIENT_ID`
    - `DATABASE_URL` (PostgreSQL)
    - `NODE_ENV=production`
-4. Build command: `npm install && npx prisma generate && npx prisma db push`
-5. Start command: `npm start`
+4. Build: `npm install && npx prisma generate && npx prisma db push`
+5. Start: `npm start`
 
 ---
 
 ## 📝 Changelog
 
-### v2.0.0
-- ✨ Çoklu kategori desteği
+### v2.0.0 (Güncel)
+- ✨ Modal form desteği
+- ✨ Çoklu kategori
 - ✨ Transcript sistemi (HTML)
 - ✨ Rating sistemi (1-5 yıldız)
 - ✨ Auto-close sistemi
-- ✨ Hazır yanıt sistemi
+- ✨ Zamanlanmış kapatma
+- ✨ Hazır yanıtlar
 - ✨ Öncelik seviyeleri
 - ✨ Etiket sistemi
-- ✨ Transfer komutu
-- ✨ Move komutu
-- ✨ Detaylı istatistikler
+- ✨ Çoklu dil (TR/EN)
+- ✨ REST API
+- ✨ Web Dashboard
+- ✨ DM bildirimleri
+- ✨ Webhook desteği
 - 🐛 Bug fixes
 
 ### v1.0.0
@@ -239,23 +293,22 @@ CannedResponse
 ## 🤝 Katkıda Bulunma
 
 1. Fork yapın
-2. Feature branch oluşturun (`git checkout -b feature/amazing-feature`)
-3. Commit yapın (`git commit -m 'Add amazing feature'`)
-4. Push yapın (`git push origin feature/amazing-feature`)
+2. Feature branch: `git checkout -b feature/amazing`
+3. Commit: `git commit -m 'Add amazing feature'`
+4. Push: `git push origin feature/amazing`
 5. Pull Request açın
 
 ---
 
 ## 📄 Lisans
 
-MIT License - Detaylar için [LICENSE](LICENSE) dosyasına bakın.
+MIT License - [LICENSE](LICENSE)
 
 ---
 
 ## 💬 Destek
 
 - [GitHub Issues](https://github.com/9a493/FluX-Ticket/issues)
-- Discord: [Sunucu Linki]
 
 ---
 
