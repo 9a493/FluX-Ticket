@@ -1,102 +1,49 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
-import { ticketDB, guildDB } from '../../utils/database.js';
-import logger from '../../utils/logger.js';
-
-const PRIORITIES = {
-    1: { name: 'Düşük', emoji: '🟢', color: '#57F287' },
-    2: { name: 'Orta', emoji: '🟡', color: '#FEE75C' },
-    3: { name: 'Yüksek', emoji: '🟠', color: '#F57C00' },
-    4: { name: 'Acil', emoji: '🔴', color: '#ED4245' },
-};
+import { ticketDB } from '../../utils/database.js';
+import { logAudit, AuditActions, TargetTypes } from '../../utils/auditLog.js';
 
 export default {
     data: new SlashCommandBuilder()
         .setName('priority')
-        .setDescription('Ticket önceliğini belirler')
-        .addIntegerOption(option =>
-            option.setName('seviye')
-                .setDescription('Öncelik seviyesi')
-                .setRequired(true)
-                .addChoices(
-                    { name: '🟢 Düşük', value: 1 },
-                    { name: '🟡 Orta', value: 2 },
-                    { name: '🟠 Yüksek', value: 3 },
-                    { name: '🔴 Acil', value: 4 },
-                )
-        ),
+        .setDescription('Ticket önceliğini değiştir')
+        .addIntegerOption(o => o.setName('seviye').setDescription('Öncelik seviyesi').setRequired(true)
+            .addChoices(
+                { name: '🔴 Acil', value: 4 },
+                { name: '🟠 Yüksek', value: 3 },
+                { name: '🟡 Normal', value: 2 },
+                { name: '🟢 Düşük', value: 1 },
+            )),
 
     async execute(interaction) {
-        await interaction.deferReply();
+        const ticket = await ticketDB.get(interaction.channel.id);
+        if (!ticket) return interaction.reply({ content: '❌ Bu bir ticket kanalı değil!', ephemeral: true });
 
-        const channel = interaction.channel;
         const priority = interaction.options.getInteger('seviye');
-        const member = interaction.member;
+        const oldPriority = ticket.priority;
+        await ticketDB.setPriority(interaction.channel.id, priority);
 
-        try {
-            // Bu bir ticket kanalı mı?
-            const ticket = await ticketDB.get(channel.id);
-            if (!ticket) {
-                return interaction.editReply({
-                    content: '❌ Bu komut sadece ticket kanallarında kullanılabilir!',
-                });
-            }
+        const names = { 1: '🟢 Düşük', 2: '🟡 Normal', 3: '🟠 Yüksek', 4: '🔴 Acil' };
 
-            // Sadece yetkililer öncelik değiştirebilir
-            const guildConfig = await guildDB.getOrCreate(interaction.guild.id, interaction.guild.name);
-            const staffRoles = guildConfig.staffRoles 
-                ? guildConfig.staffRoles.split(',').filter(r => r)
-                : [];
-            
-            const isStaff = staffRoles.some(roleId => member.roles.cache.has(roleId));
-            if (!isStaff && !member.permissions.has('Administrator')) {
-                return interaction.editReply({
-                    content: '❌ Bu komutu kullanmak için yetkili olmalısınız!',
-                });
-            }
+        await logAudit({
+            guildId: interaction.guild.id,
+            action: AuditActions.TICKET_PRIORITY,
+            targetType: TargetTypes.TICKET,
+            targetId: ticket.id,
+            userId: interaction.user.id,
+            userName: interaction.user.tag,
+            oldValue: { priority: oldPriority },
+            newValue: { priority },
+        });
 
-            const oldPriority = ticket.priority || 1;
-            const priorityInfo = PRIORITIES[priority];
-            const oldPriorityInfo = PRIORITIES[oldPriority];
-
-            // Önceliği güncelle
-            await ticketDB.setPriority(channel.id, priority);
-
-            // Kanal adını güncelle (opsiyonel - öncelik emojisi ekle)
-            const baseName = channel.name.replace(/^[🟢🟡🟠🔴]-/, '');
-            if (priority >= 3) {
-                await channel.setName(`${priorityInfo.emoji}-${baseName}`);
-            }
-
-            // Topic güncelle
-            const topic = channel.topic || '';
-            const newTopic = topic.replace(/Öncelik: [^\|]+/, `Öncelik: ${priorityInfo.emoji} ${priorityInfo.name}`);
-            if (newTopic !== topic) {
-                await channel.setTopic(newTopic.includes('Öncelik:') ? newTopic : `${topic} | Öncelik: ${priorityInfo.emoji} ${priorityInfo.name}`);
-            }
-
-            // Bilgilendirme mesajı
-            const embed = new EmbedBuilder()
-                .setColor(priorityInfo.color)
-                .setTitle(`${priorityInfo.emoji} Öncelik Değiştirildi`)
-                .setDescription(
-                    `Ticket önceliği güncellendi:\n\n` +
-                    `${oldPriorityInfo.emoji} ${oldPriorityInfo.name} → ${priorityInfo.emoji} **${priorityInfo.name}**`
-                )
-                .addFields(
-                    { name: '📝 Ticket', value: `#${ticket.ticketNumber.toString().padStart(4, '0')}`, inline: true },
-                    { name: '👤 Değiştiren', value: `${interaction.user}`, inline: true },
-                )
-                .setTimestamp();
-
-            await interaction.editReply({ embeds: [embed] });
-
-            logger.info(`Ticket #${ticket.ticketNumber} priority changed to ${priorityInfo.name} by ${interaction.user.tag}`);
-
-        } catch (error) {
-            logger.error('Priority command hatası:', error);
-            await interaction.editReply({
-                content: '❌ Öncelik değiştirilirken bir hata oluştu!',
-            });
+        // Kanal adını güncelle (acil ise)
+        if (priority === 4) {
+            const num = ticket.ticketNumber.toString().padStart(4, '0');
+            await interaction.channel.setName(`🔴-urgent-${num}`).catch(() => {});
         }
+
+        const embed = new EmbedBuilder()
+            .setColor(priority === 4 ? '#ED4245' : '#5865F2')
+            .setDescription(`✅ Öncelik **${names[priority]}** olarak değiştirildi.`);
+        await interaction.reply({ embeds: [embed] });
     },
 };

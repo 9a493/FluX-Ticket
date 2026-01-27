@@ -1,5 +1,5 @@
-// Prisma Schema for FluX Ticket Bot v2.0
-// Supports: SQLite (development) and PostgreSQL (production)
+// Prisma Schema for FluX Ticket Bot v3.0 - MEGA Edition
+// 43+ Features Support
 
 generator client {
     provider = "prisma-client-js"
@@ -29,19 +29,54 @@ model Guild {
     welcomeMessage       String?
     closeMessage         String?
     locale               String    @default("tr")
+    timezone             String    @default("Europe/Istanbul")
+    
+    // Business Hours
+    businessHoursEnabled Boolean   @default(false)
+    businessHoursStart   String?   @default("09:00")
+    businessHoursEnd     String?   @default("18:00")
+    businessDays         String?   @default("1,2,3,4,5")
+    outsideHoursMessage  String?
+    
+    // SLA Settings
+    slaEnabled           Boolean   @default(false)
+    slaResponseTime      Int?      @default(60)
+    slaResolveTime       Int?      @default(1440)
+    slaEscalationRoleId  String?
+    
+    // AI Settings (Claude)
+    aiEnabled            Boolean   @default(false)
+    aiAutoResponse       Boolean   @default(false)
+    aiSystemPrompt       String?
+    
+    // Auto-Assign Settings
+    autoAssignEnabled    Boolean   @default(false)
+    autoAssignMode       String?   @default("round-robin")
+    
+    // Spam Protection
+    spamProtection       Boolean   @default(true)
+    spamMaxTickets       Int       @default(5)
+    spamTimeWindow       Int       @default(60)
     
     // Notifications
     dmNotifications      Boolean   @default(true)
     dmOnStaffReply       Boolean   @default(false)
     webhookUrl           String?
     
+    // Gamification
+    gamificationEnabled  Boolean   @default(false)
+    
     // Relations
     tickets              Ticket[]
     categories           Category[]
     cannedResponses      CannedResponse[]
+    templates            TicketTemplate[]
     stats                GuildStats?
+    auditLogs            AuditLog[]
+    knowledgeBase        KBArticle[]
+    staffMembers         StaffMember[]
+    keywordTriggers      KeywordTrigger[]
     
-    // Timestamps
     createdAt            DateTime  @default(now())
     updatedAt            DateTime  @updatedAt
 }
@@ -59,6 +94,10 @@ model Category {
     
     discordCategoryId    String?
     staffRoles           String?
+    
+    slaResponseTime      Int?
+    slaResolveTime       Int?
+    templateId           String?
     
     enabled              Boolean   @default(true)
     order                Int       @default(0)
@@ -87,26 +126,48 @@ model Ticket {
     description          String?
     
     status               String    @default("open")
-    priority             Int       @default(1)
+    priority             Int       @default(2)
     tags                 String?
     
     claimedBy            String?
     claimedAt            DateTime?
+    assignedTo           String?
+    
     closedBy             String?
     closeReason          String?
     closedAt             DateTime?
     
-    // Scheduled Close
     scheduledCloseAt     DateTime?
     scheduledCloseBy     String?
     scheduledCloseReason String?
     
+    // SLA
+    slaResponseDeadline  DateTime?
+    slaResolveDeadline   DateTime?
+    slaResponseMet       Boolean?
+    slaResolveMet        Boolean?
+    firstResponseAt      DateTime?
+    escalatedAt          DateTime?
+    
+    // Merge
+    mergedIntoId         String?
+    watchers             String?
+    
     // Metrics
     messageCount         Int       @default(0)
+    staffMessageCount    Int       @default(0)
     rating               Int?
+    feedback             String?
     transcriptUrl        String?
     
+    // AI
+    aiSuggestion         String?
+    sentiment            String?
+    
     lastActivity         DateTime  @default(now())
+    
+    notes                TicketNote[]
+    messages             TicketMessage[]
     
     createdAt            DateTime  @default(now())
     updatedAt            DateTime  @updatedAt
@@ -114,76 +175,251 @@ model Ticket {
     @@index([guildId, status])
     @@index([guildId, userId])
     @@index([lastActivity])
-    @@index([scheduledCloseAt])
 }
 
-// ==================== USER MODEL ====================
-model User {
-    id                   String    @id
-    username             String
+// ==================== TICKET NOTE ====================
+model TicketNote {
+    id        String   @id @default(cuid())
+    ticketId  String
+    ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+    authorId  String
+    content   String
+    createdAt DateTime @default(now())
     
-    blacklisted          Boolean   @default(false)
-    blacklistReason      String?
-    
-    totalTickets         Int       @default(0)
-    
-    createdAt            DateTime  @default(now())
-    updatedAt            DateTime  @updatedAt
+    @@index([ticketId])
 }
 
-// ==================== GUILD STATS MODEL ====================
-model GuildStats {
-    id                   String    @id @default(cuid())
-    guildId              String    @unique
-    guild                Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
+// ==================== TICKET MESSAGE ====================
+model TicketMessage {
+    id         String   @id @default(cuid())
+    ticketId   String
+    ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+    messageId  String   @unique
+    authorId   String
+    authorName String
+    content    String
+    isStaff    Boolean  @default(false)
+    createdAt  DateTime @default(now())
     
-    totalTickets         Int       @default(0)
-    openTickets          Int       @default(0)
-    closedTickets        Int       @default(0)
-    
-    averageResponseTime  Float?
-    averageCloseTime     Float?
-    averageRating        Float?
-    
-    createdAt            DateTime  @default(now())
-    updatedAt            DateTime  @updatedAt
+    @@index([ticketId])
 }
 
-// ==================== CANNED RESPONSE MODEL ====================
-model CannedResponse {
-    id                   String    @id @default(cuid())
-    guildId              String
-    guild                Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
-    
-    name                 String
-    content              String
-    
-    createdBy            String
-    useCount             Int       @default(0)
-    
-    createdAt            DateTime  @default(now())
-    updatedAt            DateTime  @updatedAt
+// ==================== TICKET TEMPLATE ====================
+model TicketTemplate {
+    id            String  @id @default(cuid())
+    guildId       String
+    guild         Guild   @relation(fields: [guildId], references: [id], onDelete: Cascade)
+    name          String
+    description   String?
+    emoji         String?
+    fields        String  @default("[]")
+    autoCategory  String?
+    autoPriority  Int?
+    autoTags      String?
+    enabled       Boolean @default(true)
+    useCount      Int     @default(0)
+    createdAt     DateTime @default(now())
+    updatedAt     DateTime @updatedAt
     
     @@unique([guildId, name])
 }
 
-// ==================== API KEY MODEL ====================
+// ==================== USER ====================
+model User {
+    id              String    @id
+    username        String
+    blacklisted     Boolean   @default(false)
+    blacklistReason String?
+    blacklistedAt   DateTime?
+    blacklistedBy   String?
+    totalTickets    Int       @default(0)
+    locale          String?
+    createdAt       DateTime  @default(now())
+    updatedAt       DateTime  @updatedAt
+}
+
+// ==================== STAFF MEMBER ====================
+model StaffMember {
+    id                  String    @id @default(cuid())
+    guildId             String
+    guild               Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
+    userId              String
+    username            String
+    
+    ticketsClaimed      Int       @default(0)
+    ticketsClosed       Int       @default(0)
+    totalRatings        Int       @default(0)
+    ratingSum           Int       @default(0)
+    avgResponseTime     Float?
+    
+    // Gamification
+    xp                  Int       @default(0)
+    level               Int       @default(1)
+    badges              String?
+    currentStreak       Int       @default(0)
+    longestStreak       Int       @default(0)
+    lastActiveDate      DateTime?
+    
+    // Auto-Assign
+    autoAssignEnabled   Boolean   @default(true)
+    currentLoad         Int       @default(0)
+    maxLoad             Int       @default(10)
+    isAvailable         Boolean   @default(true)
+    
+    createdAt           DateTime  @default(now())
+    updatedAt           DateTime  @updatedAt
+    
+    @@unique([guildId, userId])
+}
+
+// ==================== GUILD STATS ====================
+model GuildStats {
+    id                  String  @id @default(cuid())
+    guildId             String  @unique
+    guild               Guild   @relation(fields: [guildId], references: [id], onDelete: Cascade)
+    totalTickets        Int     @default(0)
+    openTickets         Int     @default(0)
+    closedTickets       Int     @default(0)
+    avgResponseTime     Float?
+    avgCloseTime        Float?
+    avgRating           Float?
+    slaResponseMet      Int     @default(0)
+    slaResponseMissed   Int     @default(0)
+    createdAt           DateTime @default(now())
+    updatedAt           DateTime @updatedAt
+}
+
+// ==================== CANNED RESPONSE ====================
+model CannedResponse {
+    id        String   @id @default(cuid())
+    guildId   String
+    guild     Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+    name      String
+    content   String
+    category  String?
+    createdBy String
+    useCount  Int      @default(0)
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+    
+    @@unique([guildId, name])
+}
+
+// ==================== KEYWORD TRIGGER ====================
+model KeywordTrigger {
+    id           String  @id @default(cuid())
+    guildId      String
+    guild        Guild   @relation(fields: [guildId], references: [id], onDelete: Cascade)
+    keywords     String
+    matchType    String  @default("contains")
+    setCategory  String?
+    setPriority  Int?
+    setTags      String?
+    sendResponse String?
+    enabled      Boolean @default(true)
+    useCount     Int     @default(0)
+    createdAt    DateTime @default(now())
+    updatedAt    DateTime @updatedAt
+}
+
+// ==================== KNOWLEDGE BASE ====================
+model KBArticle {
+    id         String   @id @default(cuid())
+    guildId    String
+    guild      Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+    title      String
+    content    String
+    category   String?
+    tags       String?
+    authorId   String
+    views      Int      @default(0)
+    helpful    Int      @default(0)
+    notHelpful Int      @default(0)
+    pinned     Boolean  @default(false)
+    published  Boolean  @default(true)
+    createdAt  DateTime @default(now())
+    updatedAt  DateTime @updatedAt
+    
+    @@index([guildId, category])
+}
+
+// ==================== AUDIT LOG ====================
+model AuditLog {
+    id         String   @id @default(cuid())
+    guildId    String
+    guild      Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+    action     String
+    targetType String
+    targetId   String?
+    userId     String
+    userTag    String
+    oldValue   String?
+    newValue   String?
+    reason     String?
+    createdAt  DateTime @default(now())
+    
+    @@index([guildId, action])
+    @@index([guildId, createdAt])
+}
+
+// ==================== API KEY ====================
 model ApiKey {
-    id                   String    @id @default(cuid())
-    guildId              String
-    
-    key                  String    @unique
-    name                 String
-    permissions          String    @default("read")
-    
-    lastUsed             DateTime?
-    usageCount           Int       @default(0)
-    
-    enabled              Boolean   @default(true)
-    expiresAt            DateTime?
-    
-    createdAt            DateTime  @default(now())
-    updatedAt            DateTime  @updatedAt
+    id          String    @id @default(cuid())
+    guildId     String
+    key         String    @unique
+    name        String
+    permissions String    @default("read")
+    lastUsed    DateTime?
+    usageCount  Int       @default(0)
+    enabled     Boolean   @default(true)
+    expiresAt   DateTime?
+    createdAt   DateTime  @default(now())
+    updatedAt   DateTime  @updatedAt
     
     @@index([guildId])
+}
+
+// ==================== REMINDER ====================
+model Reminder {
+    id        String   @id @default(cuid())
+    guildId   String
+    ticketId  String?
+    channelId String
+    userId    String
+    message   String?
+    remindAt  DateTime
+    sent      Boolean  @default(false)
+    createdAt DateTime @default(now())
+    
+    @@index([remindAt, sent])
+}
+
+// ==================== DAILY STATS ====================
+model DailyStats {
+    id              String   @id @default(cuid())
+    guildId         String
+    date            DateTime
+    ticketsOpened   Int      @default(0)
+    ticketsClosed   Int      @default(0)
+    avgResponseTime Float?
+    avgRating       Float?
+    slaMetCount     Int      @default(0)
+    slaMissedCount  Int      @default(0)
+    
+    @@unique([guildId, date])
+    @@index([guildId, date])
+}
+
+// ==================== FEEDBACK ====================
+model Feedback {
+    id        String   @id @default(cuid())
+    guildId   String
+    ticketId  String
+    userId    String
+    staffId   String?
+    rating    Int
+    comment   String?
+    createdAt DateTime @default(now())
+    
+    @@index([guildId, staffId])
 }

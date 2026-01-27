@@ -4,9 +4,7 @@ import logger from './logger.js';
 const globalForPrisma = globalThis;
 
 export const prisma = globalForPrisma.prisma || new PrismaClient({
-    log: process.env.NODE_ENV === 'development' 
-        ? ['query', 'error', 'warn'] 
-        : ['error'],
+    log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
 });
 
 if (process.env.NODE_ENV !== 'production') {
@@ -116,7 +114,6 @@ export const ticketDB = {
             });
 
             await userDB.incrementTicketCount(userId);
-
             logger.info(`Ticket oluşturuldu: #${ticket.ticketNumber}`);
             return ticket;
         } catch (error) {
@@ -133,6 +130,18 @@ export const ticketDB = {
             });
         } catch (error) {
             logger.error('Ticket get hatası:', error);
+            throw error;
+        }
+    },
+
+    async getById(ticketId) {
+        try {
+            return await prisma.ticket.findUnique({
+                where: { id: ticketId },
+                include: { guild: true, category: true }
+            });
+        } catch (error) {
+            logger.error('Ticket getById hatası:', error);
             throw error;
         }
     },
@@ -268,17 +277,21 @@ export const ticketDB = {
         }
     },
 
-    async incrementMessages(channelId) {
+    async incrementMessages(channelId, isStaff = false) {
         try {
+            const data = { 
+                messageCount: { increment: 1 }, 
+                lastActivity: new Date() 
+            };
+            if (isStaff) {
+                data.staffMessageCount = { increment: 1 };
+            }
             return await prisma.ticket.update({
                 where: { channelId },
-                data: {
-                    messageCount: { increment: 1 },
-                    lastActivity: new Date(),
-                }
+                data
             });
         } catch (error) {
-            // Silent fail
+            // Silent
         }
     },
 
@@ -362,7 +375,19 @@ export const ticketDB = {
                 }
             });
         } catch (error) {
-            logger.error('getScheduledTickets hatası:', error);
+            return [];
+        }
+    },
+
+    async getOpenTicketsWithSLA() {
+        try {
+            return await prisma.ticket.findMany({
+                where: {
+                    status: { in: ['open', 'claimed'] }
+                },
+                include: { category: true }
+            });
+        } catch (error) {
             return [];
         }
     },
@@ -407,13 +432,55 @@ export const ticketDB = {
                 _avg: { rating: true }
             });
 
-            return {
-                claimed,
-                closed,
-                averageRating: avgRating._avg.rating || 0,
-            };
+            return { claimed, closed, averageRating: avgRating._avg.rating || 0 };
         } catch (error) {
             logger.error('getStaffStats hatası:', error);
+            throw error;
+        }
+    },
+
+    async search(guildId, query, limit = 20) {
+        try {
+            return await prisma.ticket.findMany({
+                where: {
+                    guildId,
+                    OR: [
+                        { subject: { contains: query } },
+                        { description: { contains: query } },
+                        { tags: { contains: query } },
+                    ]
+                },
+                orderBy: { createdAt: 'desc' },
+                take: limit,
+            });
+        } catch (error) {
+            logger.error('Ticket search hatası:', error);
+            return [];
+        }
+    },
+
+    async merge(sourceChannelId, targetChannelId) {
+        try {
+            const source = await prisma.ticket.update({
+                where: { channelId: sourceChannelId },
+                data: {
+                    status: 'closed',
+                    mergedInto: targetChannelId,
+                    closedAt: new Date(),
+                }
+            });
+
+            await prisma.ticket.update({
+                where: { channelId: targetChannelId },
+                data: {
+                    mergedFrom: sourceChannelId,
+                    messageCount: { increment: source.messageCount },
+                }
+            });
+
+            return source;
+        } catch (error) {
+            logger.error('Ticket merge hatası:', error);
             throw error;
         }
     },
@@ -523,12 +590,24 @@ export const userDB = {
         }
     },
 
-    async addBlacklist(userId, username, reason = null) {
+    async addBlacklist(userId, username, reason = null, blacklistedBy = null) {
         try {
             return await prisma.user.upsert({
                 where: { id: userId },
-                update: { blacklisted: true, blacklistReason: reason },
-                create: { id: userId, username, blacklisted: true, blacklistReason: reason }
+                update: { 
+                    blacklisted: true, 
+                    blacklistReason: reason,
+                    blacklistedAt: new Date(),
+                    blacklistedBy,
+                },
+                create: { 
+                    id: userId, 
+                    username, 
+                    blacklisted: true, 
+                    blacklistReason: reason,
+                    blacklistedAt: new Date(),
+                    blacklistedBy,
+                }
             });
         } catch (error) {
             logger.error('addBlacklist hatası:', error);
@@ -540,7 +619,12 @@ export const userDB = {
         try {
             return await prisma.user.update({
                 where: { id: userId },
-                data: { blacklisted: false, blacklistReason: null }
+                data: { 
+                    blacklisted: false, 
+                    blacklistReason: null,
+                    blacklistedAt: null,
+                    blacklistedBy: null,
+                }
             });
         } catch (error) {
             logger.error('removeBlacklist hatası:', error);
@@ -591,18 +675,6 @@ export const cannedDB = {
             });
         } catch (error) {
             logger.error('CannedResponse getAll hatası:', error);
-            throw error;
-        }
-    },
-
-    async update(guildId, name, data) {
-        try {
-            return await prisma.cannedResponse.update({
-                where: { guildId_name: { guildId, name: name.toLowerCase() } },
-                data
-            });
-        } catch (error) {
-            logger.error('CannedResponse update hatası:', error);
             throw error;
         }
     },
@@ -677,6 +749,226 @@ export const statsDB = {
             throw error;
         }
     },
+
+    async incrementSLAMet(guildId) {
+        try {
+            await prisma.guildStats.update({
+                where: { guildId },
+                data: { slaMetCount: { increment: 1 } }
+            });
+        } catch (error) {
+            // Silent
+        }
+    },
+
+    async incrementSLABreached(guildId) {
+        try {
+            await prisma.guildStats.update({
+                where: { guildId },
+                data: { slaBreachedCount: { increment: 1 } }
+            });
+        } catch (error) {
+            // Silent
+        }
+    },
+};
+
+// ==================== STAFF FUNCTIONS ====================
+export const staffDB = {
+    async getOrCreate(guildId, userId, username) {
+        try {
+            let staff = await prisma.staffMember.findUnique({
+                where: { guildId_userId: { guildId, userId } }
+            });
+
+            if (!staff) {
+                staff = await prisma.staffMember.create({
+                    data: { guildId, userId, username }
+                });
+            }
+
+            return staff;
+        } catch (error) {
+            logger.error('Staff getOrCreate hatası:', error);
+            throw error;
+        }
+    },
+
+    async get(guildId, userId) {
+        try {
+            return await prisma.staffMember.findUnique({
+                where: { guildId_userId: { guildId, userId } }
+            });
+        } catch (error) {
+            return null;
+        }
+    },
+
+    async getAll(guildId) {
+        try {
+            return await prisma.staffMember.findMany({
+                where: { guildId },
+                orderBy: { xp: 'desc' }
+            });
+        } catch (error) {
+            return [];
+        }
+    },
+
+    async update(guildId, userId, data) {
+        try {
+            return await prisma.staffMember.update({
+                where: { guildId_userId: { guildId, userId } },
+                data
+            });
+        } catch (error) {
+            logger.error('Staff update hatası:', error);
+            throw error;
+        }
+    },
+
+    async updateXP(guildId, userId, xp, level) {
+        try {
+            return await prisma.staffMember.update({
+                where: { guildId_userId: { guildId, userId } },
+                data: { xp, level }
+            });
+        } catch (error) {
+            logger.error('Staff updateXP hatası:', error);
+            throw error;
+        }
+    },
+
+    async updateBadges(guildId, userId, badges) {
+        try {
+            return await prisma.staffMember.update({
+                where: { guildId_userId: { guildId, userId } },
+                data: { badges }
+            });
+        } catch (error) {
+            logger.error('Staff updateBadges hatası:', error);
+            throw error;
+        }
+    },
+
+    async updateStreak(guildId, userId, currentStreak, longestStreak, lastActiveDate) {
+        try {
+            return await prisma.staffMember.update({
+                where: { guildId_userId: { guildId, userId } },
+                data: { currentStreak, longestStreak, lastActiveDate }
+            });
+        } catch (error) {
+            logger.error('Staff updateStreak hatası:', error);
+            throw error;
+        }
+    },
+
+    async incrementStats(guildId, userId, field) {
+        try {
+            return await prisma.staffMember.update({
+                where: { guildId_userId: { guildId, userId } },
+                data: { [field]: { increment: 1 } }
+            });
+        } catch (error) {
+            // Silent
+        }
+    },
+
+    async getAvailableForAssign(guildId) {
+        try {
+            return await prisma.staffMember.findMany({
+                where: {
+                    guildId,
+                    autoAssignEnabled: true,
+                    currentLoad: { lt: prisma.staffMember.fields.maxLoad }
+                },
+                orderBy: { currentLoad: 'asc' }
+            });
+        } catch (error) {
+            return [];
+        }
+    },
+
+    async incrementLoad(guildId, userId) {
+        try {
+            await prisma.staffMember.update({
+                where: { guildId_userId: { guildId, userId } },
+                data: { currentLoad: { increment: 1 } }
+            });
+        } catch (error) {
+            // Silent
+        }
+    },
+
+    async decrementLoad(guildId, userId) {
+        try {
+            await prisma.staffMember.update({
+                where: { guildId_userId: { guildId, userId } },
+                data: { currentLoad: { decrement: 1 } }
+            });
+        } catch (error) {
+            // Silent
+        }
+    },
+
+    async resetAllLoads(guildId) {
+        try {
+            await prisma.staffMember.updateMany({
+                where: { guildId },
+                data: { currentLoad: 0 }
+            });
+        } catch (error) {
+            // Silent
+        }
+    },
+
+    async getTopByXP(guildId, limit = 10) {
+        try {
+            return await prisma.staffMember.findMany({
+                where: { guildId },
+                orderBy: { xp: 'desc' },
+                take: limit
+            });
+        } catch (error) {
+            return [];
+        }
+    },
+
+    async getTopByTickets(guildId, limit = 10) {
+        try {
+            return await prisma.staffMember.findMany({
+                where: { guildId },
+                orderBy: { ticketsClosed: 'desc' },
+                take: limit
+            });
+        } catch (error) {
+            return [];
+        }
+    },
+
+    async getTopByRating(guildId, limit = 10) {
+        try {
+            return await prisma.staffMember.findMany({
+                where: { guildId, totalRatings: { gte: 5 } },
+                orderBy: { averageRating: 'desc' },
+                take: limit
+            });
+        } catch (error) {
+            return [];
+        }
+    },
+
+    async getTopByStreak(guildId, limit = 10) {
+        try {
+            return await prisma.staffMember.findMany({
+                where: { guildId },
+                orderBy: { longestStreak: 'desc' },
+                take: limit
+            });
+        } catch (error) {
+            return [];
+        }
+    },
 };
 
 // ==================== API KEY FUNCTIONS ====================
@@ -702,7 +994,6 @@ export const apiKeyDB = {
             if (!apiKey || !apiKey.enabled) return null;
             if (apiKey.expiresAt && apiKey.expiresAt < new Date()) return null;
 
-            // Update usage
             await prisma.apiKey.update({
                 where: { key },
                 data: { lastUsed: new Date(), usageCount: { increment: 1 } }
@@ -719,29 +1010,246 @@ export const apiKeyDB = {
             return await prisma.apiKey.findMany({
                 where: { guildId },
                 select: {
-                    id: true,
-                    name: true,
-                    permissions: true,
-                    lastUsed: true,
-                    usageCount: true,
-                    enabled: true,
-                    createdAt: true
+                    id: true, name: true, permissions: true,
+                    lastUsed: true, usageCount: true, enabled: true, createdAt: true
                 }
             });
         } catch (error) {
-            logger.error('ApiKey getAll hatası:', error);
-            throw error;
+            return [];
         }
     },
 
     async delete(id) {
         try {
-            return await prisma.apiKey.delete({
-                where: { id }
-            });
+            return await prisma.apiKey.delete({ where: { id } });
         } catch (error) {
             logger.error('ApiKey delete hatası:', error);
             throw error;
+        }
+    },
+};
+
+// ==================== NOTE FUNCTIONS ====================
+export const noteDB = {
+    async create(ticketId, authorId, content) {
+        try {
+            return await prisma.ticketNote.create({
+                data: { ticketId, authorId, content }
+            });
+        } catch (error) {
+            logger.error('Note create hatası:', error);
+            throw error;
+        }
+    },
+
+    async getAll(ticketId) {
+        try {
+            return await prisma.ticketNote.findMany({
+                where: { ticketId },
+                orderBy: { createdAt: 'desc' }
+            });
+        } catch (error) {
+            return [];
+        }
+    },
+
+    async delete(noteId) {
+        try {
+            return await prisma.ticketNote.delete({ where: { id: noteId } });
+        } catch (error) {
+            logger.error('Note delete hatası:', error);
+            throw error;
+        }
+    },
+};
+
+// ==================== MESSAGE FUNCTIONS ====================
+export const messageDB = {
+    async create(ticketId, messageId, authorId, authorName, content, isStaff = false) {
+        try {
+            return await prisma.ticketMessage.create({
+                data: { ticketId, messageId, authorId, authorName, content, isStaff }
+            });
+        } catch (error) {
+            // Duplicate message ID, ignore
+        }
+    },
+
+    async getAll(ticketId) {
+        try {
+            return await prisma.ticketMessage.findMany({
+                where: { ticketId },
+                orderBy: { createdAt: 'asc' }
+            });
+        } catch (error) {
+            return [];
+        }
+    },
+
+    async search(guildId, query, limit = 20) {
+        try {
+            const tickets = await prisma.ticket.findMany({
+                where: { guildId },
+                select: { id: true }
+            });
+            const ticketIds = tickets.map(t => t.id);
+
+            return await prisma.ticketMessage.findMany({
+                where: {
+                    ticketId: { in: ticketIds },
+                    content: { contains: query }
+                },
+                take: limit,
+                include: { ticket: true }
+            });
+        } catch (error) {
+            return [];
+        }
+    },
+};
+
+// ==================== TEMPLATE FUNCTIONS ====================
+export const templateDB = {
+    async create(guildId, data) {
+        try {
+            return await prisma.ticketTemplate.create({
+                data: {
+                    guildId,
+                    name: data.name,
+                    description: data.description,
+                    emoji: data.emoji,
+                    fields: JSON.stringify(data.fields || []),
+                    defaultPriority: data.defaultPriority || 2,
+                    defaultTags: data.defaultTags,
+                    autoAssignRole: data.autoAssignRole,
+                }
+            });
+        } catch (error) {
+            logger.error('Template create hatası:', error);
+            throw error;
+        }
+    },
+
+    async get(templateId) {
+        try {
+            const template = await prisma.ticketTemplate.findUnique({
+                where: { id: templateId }
+            });
+            if (template) {
+                template.fields = JSON.parse(template.fields);
+            }
+            return template;
+        } catch (error) {
+            return null;
+        }
+    },
+
+    async getAll(guildId) {
+        try {
+            const templates = await prisma.ticketTemplate.findMany({
+                where: { guildId, enabled: true },
+                orderBy: { useCount: 'desc' }
+            });
+            return templates.map(t => ({ ...t, fields: JSON.parse(t.fields) }));
+        } catch (error) {
+            return [];
+        }
+    },
+
+    async delete(templateId) {
+        try {
+            return await prisma.ticketTemplate.delete({ where: { id: templateId } });
+        } catch (error) {
+            logger.error('Template delete hatası:', error);
+            throw error;
+        }
+    },
+
+    async incrementUse(templateId) {
+        try {
+            await prisma.ticketTemplate.update({
+                where: { id: templateId },
+                data: { useCount: { increment: 1 } }
+            });
+        } catch (error) {
+            // Silent
+        }
+    },
+};
+
+// ==================== DAILY STATS FUNCTIONS ====================
+export const dailyStatsDB = {
+    async recordDaily(guildId, data) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        try {
+            return await prisma.dailyStats.upsert({
+                where: { guildId_date: { guildId, date: today } },
+                update: data,
+                create: { guildId, date: today, ...data }
+            });
+        } catch (error) {
+            logger.error('Daily stats record hatası:', error);
+        }
+    },
+
+    async getRange(guildId, startDate, endDate) {
+        try {
+            return await prisma.dailyStats.findMany({
+                where: {
+                    guildId,
+                    date: { gte: startDate, lte: endDate }
+                },
+                orderBy: { date: 'asc' }
+            });
+        } catch (error) {
+            return [];
+        }
+    },
+
+    async getLast30Days(guildId) {
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - 30);
+        return this.getRange(guildId, startDate, endDate);
+    },
+};
+
+// ==================== REMINDER FUNCTIONS ====================
+export const reminderDB = {
+    async create(guildId, ticketId, channelId, userId, message, remindAt) {
+        try {
+            return await prisma.reminder.create({
+                data: { guildId, ticketId, channelId, userId, message, remindAt }
+            });
+        } catch (error) {
+            logger.error('Reminder create hatası:', error);
+            throw error;
+        }
+    },
+
+    async getDue() {
+        try {
+            return await prisma.reminder.findMany({
+                where: {
+                    completed: false,
+                    remindAt: { lte: new Date() }
+                }
+            });
+        } catch (error) {
+            return [];
+        }
+    },
+
+    async markComplete(reminderId) {
+        try {
+            await prisma.reminder.update({
+                where: { id: reminderId },
+                data: { completed: true }
+            });
+        } catch (error) {
+            // Silent
         }
     },
 };

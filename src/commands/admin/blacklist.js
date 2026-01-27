@@ -1,88 +1,51 @@
 import { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
-import { userDB, guildDB } from '../../utils/database.js';
-import logger from '../../utils/logger.js';
+import { userDB } from '../../utils/database.js';
+import { logAudit, AuditActions, TargetTypes } from '../../utils/auditLog.js';
 
 export default {
     data: new SlashCommandBuilder()
         .setName('blacklist')
-        .setDescription('Kullanıcıyı ticket sisteminden engeller')
-        .addUserOption(option =>
-            option.setName('kullanıcı')
-                .setDescription('Engellenecek kullanıcı')
-                .setRequired(true)
-        )
-        .addStringOption(option =>
-            option.setName('sebep')
-                .setDescription('Engelleme sebebi')
-                .setRequired(false)
-                .setMaxLength(200)
-        )
-        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+        .setDescription('Kara liste yönetimi')
+        .addSubcommand(s => s.setName('add').setDescription('Kara listeye ekle')
+            .addUserOption(o => o.setName('kullanıcı').setDescription('Kullanıcı').setRequired(true))
+            .addStringOption(o => o.setName('sebep').setDescription('Sebep')))
+        .addSubcommand(s => s.setName('remove').setDescription('Kara listeden çıkar')
+            .addUserOption(o => o.setName('kullanıcı').setDescription('Kullanıcı').setRequired(true)))
+        .addSubcommand(s => s.setName('check').setDescription('Kara liste durumunu kontrol et')
+            .addUserOption(o => o.setName('kullanıcı').setDescription('Kullanıcı').setRequired(true)))
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
 
     async execute(interaction) {
-        await interaction.deferReply({ ephemeral: true });
+        const sub = interaction.options.getSubcommand();
+        const user = interaction.options.getUser('kullanıcı');
 
-        const targetUser = interaction.options.getUser('kullanıcı');
-        const reason = interaction.options.getString('sebep') || 'Sebep belirtilmedi';
-
-        try {
-            // Kullanıcı zaten engellenmiş mi?
-            const isBlacklisted = await userDB.isBlacklisted(targetUser.id);
-            if (isBlacklisted) {
-                return interaction.editReply({
-                    content: `❌ **${targetUser.tag}** zaten engellenmiş!`,
-                });
-            }
-
-            // Kendini engellemeye çalışıyor mu?
-            if (targetUser.id === interaction.user.id) {
-                return interaction.editReply({
-                    content: '❌ Kendinizi engelleyemezsiniz!',
-                });
-            }
-
-            // Bot'u engellemeye çalışıyor mu?
-            if (targetUser.bot) {
-                return interaction.editReply({
-                    content: '❌ Botları engelleyemezsiniz!',
-                });
-            }
-
-            // Blacklist'e ekle
-            await userDB.addBlacklist(targetUser.id, targetUser.tag, reason);
-
-            // Bilgilendirme mesajı
-            const embed = new EmbedBuilder()
-                .setColor('#ED4245')
-                .setTitle('🚫 Kullanıcı Engellendi')
-                .setThumbnail(targetUser.displayAvatarURL())
-                .addFields(
-                    { name: '👤 Kullanıcı', value: `${targetUser} (${targetUser.tag})`, inline: true },
-                    { name: '👮 Engelleyen', value: `${interaction.user}`, inline: true },
-                    { name: '📋 Sebep', value: reason, inline: false },
-                )
-                .setTimestamp();
-
-            await interaction.editReply({ embeds: [embed] });
-
-            // Log kanalına bildir
-            const guildConfig = await guildDB.getOrCreate(interaction.guild.id, interaction.guild.name);
-            if (guildConfig.logChannelId) {
-                try {
-                    const logChannel = await interaction.guild.channels.fetch(guildConfig.logChannelId);
-                    await logChannel.send({ embeds: [embed] });
-                } catch (error) {
-                    // Log kanalına gönderilemezse sessizce devam et
-                }
-            }
-
-            logger.info(`${targetUser.tag} blacklisted by ${interaction.user.tag} - Reason: ${reason}`);
-
-        } catch (error) {
-            logger.error('Blacklist command hatası:', error);
-            await interaction.editReply({
-                content: '❌ Kullanıcı engellenirken bir hata oluştu!',
+        if (sub === 'add') {
+            const reason = interaction.options.getString('sebep') || 'Sebep belirtilmedi';
+            await userDB.addBlacklist(user.id, user.username, reason, interaction.user.id);
+            await logAudit({
+                guildId: interaction.guild.id,
+                action: AuditActions.USER_BLACKLIST,
+                targetType: TargetTypes.USER,
+                targetId: user.id,
+                userId: interaction.user.id,
+                userName: interaction.user.tag,
+                details: reason,
             });
+            await interaction.reply({ content: `✅ ${user} kara listeye eklendi.\nSebep: ${reason}`, ephemeral: true });
+        } else if (sub === 'remove') {
+            await userDB.removeBlacklist(user.id);
+            await logAudit({
+                guildId: interaction.guild.id,
+                action: AuditActions.USER_UNBLACKLIST,
+                targetType: TargetTypes.USER,
+                targetId: user.id,
+                userId: interaction.user.id,
+                userName: interaction.user.tag,
+            });
+            await interaction.reply({ content: `✅ ${user} kara listeden çıkarıldı.`, ephemeral: true });
+        } else {
+            const isBlacklisted = await userDB.isBlacklisted(user.id);
+            await interaction.reply({ content: isBlacklisted ? `❌ ${user} kara listede.` : `✅ ${user} kara listede değil.`, ephemeral: true });
         }
     },
 };

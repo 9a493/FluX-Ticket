@@ -1,9 +1,8 @@
 import { REST, Routes } from 'discord.js';
-import dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
 import { readdirSync } from 'fs';
-import { pathToFileURL } from 'url';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
 
 dotenv.config();
 
@@ -11,76 +10,51 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const commands = [];
+const commandsPath = join(__dirname, 'commands');
+const commandFolders = readdirSync(commandsPath);
 
-// Tüm komutları topla
 async function loadCommands() {
-    const commandFolders = readdirSync(join(__dirname, 'commands'));
-    
     for (const folder of commandFolders) {
-        const commandFiles = readdirSync(join(__dirname, 'commands', folder)).filter(
-            file => file.endsWith('.js')
-        );
-        
+        const folderPath = join(commandsPath, folder);
+        const commandFiles = readdirSync(folderPath).filter(file => file.endsWith('.js'));
+
         for (const file of commandFiles) {
-            const filePath = join(__dirname, 'commands', folder, file);
-            const fileURL = pathToFileURL(filePath).href;
-            
+            const filePath = join(folderPath, file);
             try {
-                const command = await import(fileURL);
-                if ('data' in command.default && 'execute' in command.default) {
-                    commands.push(command.default.data.toJSON());
-                    console.log(`✅ Yüklendi: ${command.default.data.name}`);
-                } else {
-                    console.log(`⚠️ Atlandı: ${file} (data veya execute eksik)`);
+                const command = await import(filePath);
+                const cmd = command.default || command;
+                
+                if (cmd.data) {
+                    commands.push(cmd.data.toJSON());
+                    console.log(`✅ Loaded: ${cmd.data.name}`);
                 }
             } catch (error) {
-                console.error(`❌ Hata (${file}):`, error.message);
+                console.error(`❌ Error loading ${file}:`, error.message);
             }
         }
     }
 }
 
-// Komutları deploy et
-async function deployCommands() {
+async function deploy() {
     await loadCommands();
 
-    if (commands.length === 0) {
-        console.error('❌ Yüklenecek komut bulunamadı!');
-        process.exit(1);
-    }
+    console.log(`\n📦 ${commands.length} komut yüklendi\n`);
 
-    const rest = new REST().setToken(process.env.TOKEN);
+    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
     try {
-        console.log(`\n🔄 ${commands.length} slash komutu kaydediliyor...`);
+        console.log('🚀 Komutlar deploy ediliyor...\n');
 
-        // Development modunda sadece belirli bir sunucuya kaydet (anında aktif)
-        if (process.env.GUILD_ID) {
-            const data = await rest.put(
-                Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
-                { body: commands }
-            );
-            console.log(`✅ ${data.length} komut test sunucusuna kaydedildi!`);
-        } 
-        // Production modunda global olarak kaydet (1 saat sürebilir)
-        else {
-            const data = await rest.put(
-                Routes.applicationCommands(process.env.CLIENT_ID),
-                { body: commands }
-            );
-            console.log(`✅ ${data.length} komut global olarak kaydedildi!`);
-            console.log(`⚠️  Global komutlar Discord'da görünmesi 1 saat sürebilir.`);
-        }
+        // Global deploy
+        const data = await rest.put(
+            Routes.applicationCommands(process.env.CLIENT_ID),
+            { body: commands },
+        );
 
-        console.log('\n📋 Kaydedilen komutlar:');
-        commands.forEach(cmd => {
-            console.log(`   • /${cmd.name} - ${cmd.description}`);
-        });
-
+        console.log(`✅ ${data.length} komut başarıyla deploy edildi!\n`);
     } catch (error) {
-        console.error('❌ Komutlar kaydedilirken hata:', error);
-        process.exit(1);
+        console.error('Deploy hatası:', error);
     }
 }
 
-deployCommands();
+deploy();

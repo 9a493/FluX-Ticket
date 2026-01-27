@@ -3,565 +3,469 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FluX Ticket Dashboard</title>
+    <title>FluX Ticket Dashboard v3.0</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .sidebar { transition: transform 0.3s ease; }
+        .card { transition: all 0.2s ease; }
+        .card:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.15); }
+        .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .glass { background: rgba(255,255,255,0.1); backdrop-filter: blur(10px); }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div id="app"></div>
+    
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <style>
-        body { background: #0f172a; }
-        .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-        .card { background: #1e293b; border: 1px solid #334155; }
-        .stat-card:hover { transform: translateY(-2px); transition: all 0.2s; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
-        .loading { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-    </style>
-</head>
-<body>
-    <div id="root"></div>
-
+    
     <script type="text/babel">
-        const { useState, useEffect, createContext, useContext } = React;
+        const { useState, useEffect, createContext, useContext, useRef } = React;
 
         // API Context
         const ApiContext = createContext();
-
-        // API Provider
+        
         function ApiProvider({ children }) {
-            const [apiKey, setApiKey] = useState(localStorage.getItem('ftk_api_key') || '');
-            const [apiUrl, setApiUrl] = useState(localStorage.getItem('ftk_api_url') || 'http://localhost:3000');
-            const [connected, setConnected] = useState(false);
+            const [apiUrl, setApiUrl] = useState(localStorage.getItem('apiUrl') || '');
+            const [apiKey, setApiKey] = useState(localStorage.getItem('apiKey') || '');
+            const [isAuth, setIsAuth] = useState(false);
 
-            const api = async (endpoint, method = 'GET', body = null) => {
-                try {
-                    const options = {
-                        method,
-                        headers: {
-                            'Authorization': `Bearer ${apiKey}`,
-                            'Content-Type': 'application/json',
-                        },
-                    };
-                    if (body) options.body = JSON.stringify(body);
-
-                    const response = await fetch(`${apiUrl}/api/v1${endpoint}`, options);
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                    return await response.json();
-                } catch (error) {
-                    console.error('API Error:', error);
-                    throw error;
-                }
+            const api = async (endpoint, options = {}) => {
+                const res = await fetch(`${apiUrl}${endpoint}`, {
+                    ...options,
+                    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json', ...options.headers }
+                });
+                if (!res.ok) throw new Error(`API Error: ${res.status}`);
+                return res.json();
             };
 
-            const connect = async () => {
+            const login = async (url, key) => {
                 try {
-                    await api('/guild');
-                    setConnected(true);
-                    localStorage.setItem('ftk_api_key', apiKey);
-                    localStorage.setItem('ftk_api_url', apiUrl);
-                    return true;
-                } catch (error) {
-                    setConnected(false);
-                    return false;
-                }
+                    const res = await fetch(`${url}/api/health`);
+                    if (res.ok) {
+                        setApiUrl(url);
+                        setApiKey(key);
+                        localStorage.setItem('apiUrl', url);
+                        localStorage.setItem('apiKey', key);
+                        setIsAuth(true);
+                        return true;
+                    }
+                } catch (e) { console.error(e); }
+                return false;
             };
 
-            return (
-                <ApiContext.Provider value={{ api, apiKey, setApiKey, apiUrl, setApiUrl, connected, connect }}>
-                    {children}
-                </ApiContext.Provider>
-            );
+            const logout = () => {
+                localStorage.removeItem('apiUrl');
+                localStorage.removeItem('apiKey');
+                setIsAuth(false);
+            };
+
+            useEffect(() => {
+                if (apiUrl && apiKey) {
+                    api('/api/health').then(() => setIsAuth(true)).catch(() => setIsAuth(false));
+                }
+            }, []);
+
+            return <ApiContext.Provider value={{ api, login, logout, isAuth, apiUrl }}>{children}</ApiContext.Provider>;
         }
 
-        // Login Component
-        function Login() {
-            const { apiKey, setApiKey, apiUrl, setApiUrl, connect } = useContext(ApiContext);
-            const [loading, setLoading] = useState(false);
-            const [error, setError] = useState('');
+        const useApi = () => useContext(ApiContext);
 
-            const handleConnect = async (e) => {
+        // Login Page
+        function LoginPage() {
+            const [url, setUrl] = useState('http://localhost:3000');
+            const [key, setKey] = useState('');
+            const [error, setError] = useState('');
+            const [loading, setLoading] = useState(false);
+            const { login } = useApi();
+
+            const handleLogin = async (e) => {
                 e.preventDefault();
                 setLoading(true);
                 setError('');
-                
-                const success = await connect();
-                if (!success) {
-                    setError('Bağlantı başarısız! API anahtarını ve URL\'i kontrol edin.');
-                }
+                const success = await login(url, key);
+                if (!success) setError('Bağlantı başarısız!');
                 setLoading(false);
             };
 
             return (
-                <div className="min-h-screen flex items-center justify-center p-4">
-                    <div className="card rounded-xl p-8 w-full max-w-md">
+                <div className="min-h-screen flex items-center justify-center gradient-bg">
+                    <div className="bg-gray-800 p-8 rounded-2xl shadow-2xl w-full max-w-md">
                         <div className="text-center mb-8">
-                            <div className="w-16 h-16 gradient-bg rounded-full flex items-center justify-center mx-auto mb-4">
-                                <i className="fas fa-ticket-alt text-white text-2xl"></i>
-                            </div>
-                            <h1 className="text-2xl font-bold text-white">FluX Ticket</h1>
-                            <p className="text-gray-400 mt-2">Dashboard'a bağlanın</p>
+                            <div className="text-5xl mb-4">🎫</div>
+                            <h1 className="text-2xl font-bold">FluX Ticket</h1>
+                            <p className="text-gray-400">Dashboard v3.0</p>
                         </div>
-
-                        <form onSubmit={handleConnect} className="space-y-4">
-                            <div>
-                                <label className="block text-gray-400 text-sm mb-2">API URL</label>
-                                <input
-                                    type="url"
-                                    value={apiUrl}
-                                    onChange={(e) => setApiUrl(e.target.value)}
-                                    placeholder="http://localhost:3000"
-                                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500"
-                                />
+                        <form onSubmit={handleLogin}>
+                            <div className="mb-4">
+                                <label className="block text-sm mb-2">API URL</label>
+                                <input type="text" value={url} onChange={e => setUrl(e.target.value)}
+                                    className="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 focus:border-purple-500 outline-none"/>
                             </div>
-
-                            <div>
-                                <label className="block text-gray-400 text-sm mb-2">API Anahtarı</label>
-                                <input
-                                    type="password"
-                                    value={apiKey}
-                                    onChange={(e) => setApiKey(e.target.value)}
-                                    placeholder="ftk_xxxxxxxxxxxxx"
-                                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500"
-                                />
+                            <div className="mb-6">
+                                <label className="block text-sm mb-2">API Key</label>
+                                <input type="password" value={key} onChange={e => setKey(e.target.value)} placeholder="ftk_..."
+                                    className="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 focus:border-purple-500 outline-none"/>
                             </div>
-
-                            {error && (
-                                <div className="bg-red-500/20 border border-red-500 rounded-lg p-3 text-red-400 text-sm">
-                                    {error}
-                                </div>
-                            )}
-
-                            <button
-                                type="submit"
-                                disabled={loading || !apiKey}
-                                className="w-full gradient-bg text-white rounded-lg py-3 font-semibold hover:opacity-90 disabled:opacity-50 transition-all"
-                            >
-                                {loading ? (
-                                    <><i className="fas fa-spinner fa-spin mr-2"></i>Bağlanıyor...</>
-                                ) : (
-                                    <><i className="fas fa-plug mr-2"></i>Bağlan</>
-                                )}
+                            {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
+                            <button type="submit" disabled={loading}
+                                className="w-full py-3 rounded-lg gradient-bg font-semibold hover:opacity-90 transition">
+                                {loading ? 'Bağlanıyor...' : 'Giriş Yap'}
                             </button>
                         </form>
-
-                        <div className="mt-6 text-center">
-                            <p className="text-gray-500 text-sm">
-                                API anahtarı almak için Discord'da <code className="text-purple-400">/apikey create</code> kullanın
-                            </p>
-                        </div>
                     </div>
                 </div>
             );
         }
 
-        // Sidebar Component
+        // Sidebar
         function Sidebar({ active, setActive }) {
-            const { api } = useContext(ApiContext);
-            const [guild, setGuild] = useState(null);
-
-            useEffect(() => {
-                api('/guild').then(setGuild).catch(console.error);
-            }, []);
-
-            const menuItems = [
-                { id: 'dashboard', icon: 'fas fa-home', label: 'Dashboard' },
-                { id: 'tickets', icon: 'fas fa-ticket-alt', label: 'Ticketlar' },
-                { id: 'categories', icon: 'fas fa-folder', label: 'Kategoriler' },
-                { id: 'canned', icon: 'fas fa-comment-dots', label: 'Hazır Yanıtlar' },
-                { id: 'settings', icon: 'fas fa-cog', label: 'Ayarlar' },
+            const { logout } = useApi();
+            const items = [
+                { id: 'dashboard', icon: 'fa-chart-line', label: 'Dashboard' },
+                { id: 'tickets', icon: 'fa-ticket', label: 'Ticketlar' },
+                { id: 'staff', icon: 'fa-users', label: 'Staff' },
+                { id: 'kb', icon: 'fa-book', label: 'Bilgi Bankası' },
+                { id: 'settings', icon: 'fa-cog', label: 'Ayarlar' },
             ];
 
             return (
-                <div className="w-64 bg-slate-900 min-h-screen p-4 border-r border-slate-700">
-                    <div className="flex items-center gap-3 mb-8 px-2">
-                        <div className="w-10 h-10 gradient-bg rounded-lg flex items-center justify-center">
-                            <i className="fas fa-ticket-alt text-white"></i>
-                        </div>
+                <div className="sidebar w-64 bg-gray-800 h-screen fixed left-0 top-0 p-4 flex flex-col">
+                    <div className="flex items-center gap-3 mb-8 p-2">
+                        <div className="text-3xl">🎫</div>
                         <div>
-                            <h1 className="text-white font-bold">FluX Ticket</h1>
-                            <p className="text-gray-500 text-xs">{guild?.name || 'Loading...'}</p>
+                            <h1 className="font-bold">FluX Ticket</h1>
+                            <p className="text-xs text-gray-400">v3.0 MEGA</p>
                         </div>
                     </div>
-
-                    <nav className="space-y-1">
-                        {menuItems.map(item => (
-                            <button
-                                key={item.id}
-                                onClick={() => setActive(item.id)}
-                                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
-                                    active === item.id 
-                                        ? 'bg-purple-500/20 text-purple-400' 
-                                        : 'text-gray-400 hover:bg-slate-800 hover:text-white'
-                                }`}
-                            >
-                                <i className={item.icon}></i>
+                    <nav className="flex-1">
+                        {items.map(item => (
+                            <button key={item.id} onClick={() => setActive(item.id)}
+                                className={`w-full flex items-center gap-3 p-3 rounded-lg mb-2 transition ${
+                                    active === item.id ? 'bg-purple-600' : 'hover:bg-gray-700'
+                                }`}>
+                                <i className={`fas ${item.icon}`}></i>
                                 <span>{item.label}</span>
                             </button>
                         ))}
                     </nav>
-
-                    <div className="absolute bottom-4 left-4 right-4">
-                        <button 
-                            onClick={() => {
-                                localStorage.removeItem('ftk_api_key');
-                                window.location.reload();
-                            }}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-all"
-                        >
-                            <i className="fas fa-sign-out-alt"></i>
-                            <span>Çıkış</span>
-                        </button>
-                    </div>
+                    <button onClick={logout} className="flex items-center gap-3 p-3 rounded-lg hover:bg-red-500/20 text-red-400">
+                        <i className="fas fa-sign-out-alt"></i>
+                        <span>Çıkış</span>
+                    </button>
                 </div>
             );
         }
 
-        // Dashboard Page
-        function DashboardPage() {
-            const { api } = useContext(ApiContext);
-            const [stats, setStats] = useState(null);
-            const [loading, setLoading] = useState(true);
+        // Chart Component
+        function Chart({ type, data, options }) {
+            const canvasRef = useRef(null);
+            const chartRef = useRef(null);
 
             useEffect(() => {
-                api('/stats').then(setStats).catch(console.error).finally(() => setLoading(false));
+                if (chartRef.current) chartRef.current.destroy();
+                chartRef.current = new window.Chart(canvasRef.current, { type, data, options });
+                return () => chartRef.current?.destroy();
+            }, [data]);
+
+            return <canvas ref={canvasRef}></canvas>;
+        }
+
+        // Dashboard Page
+        function DashboardPage() {
+            const { api } = useApi();
+            const [stats, setStats] = useState(null);
+            const [daily, setDaily] = useState([]);
+            const [leaderboard, setLeaderboard] = useState([]);
+
+            useEffect(() => {
+                api('/api/stats').then(setStats).catch(console.error);
+                api('/api/stats/daily?days=14').then(setDaily).catch(console.error);
+                api('/api/stats/leaderboard?type=tickets&limit=5').then(setLeaderboard).catch(console.error);
             }, []);
 
-            if (loading) return <LoadingState />;
-
-            const statCards = [
-                { label: 'Toplam Ticket', value: stats?.totalTickets || 0, icon: 'fas fa-ticket-alt', color: 'blue' },
-                { label: 'Açık Ticket', value: stats?.openTickets || 0, icon: 'fas fa-folder-open', color: 'green' },
-                { label: 'Kapalı Ticket', value: stats?.closedTickets || 0, icon: 'fas fa-check-circle', color: 'red' },
-                { label: 'Bugün', value: stats?.todayTickets || 0, icon: 'fas fa-calendar-day', color: 'purple' },
-                { label: 'Bu Hafta', value: stats?.weekTickets || 0, icon: 'fas fa-calendar-week', color: 'orange' },
-                { label: 'Ortalama Puan', value: stats?.averageRating?.toFixed(1) || '-', icon: 'fas fa-star', color: 'yellow' },
-            ];
-
-            const colorClasses = {
-                blue: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-                green: 'bg-green-500/20 text-green-400 border-green-500/30',
-                red: 'bg-red-500/20 text-red-400 border-red-500/30',
-                purple: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-                orange: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
-                yellow: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+            const chartData = {
+                labels: daily.map(d => new Date(d.date).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' })),
+                datasets: [
+                    { label: 'Açılan', data: daily.map(d => d.ticketsOpened), borderColor: '#10B981', backgroundColor: 'rgba(16, 185, 129, 0.1)', tension: 0.4, fill: true },
+                    { label: 'Kapatılan', data: daily.map(d => d.ticketsClosed), borderColor: '#8B5CF6', backgroundColor: 'rgba(139, 92, 246, 0.1)', tension: 0.4, fill: true },
+                ]
             };
 
-            return (
-                <div className="space-y-6">
-                    <h2 className="text-2xl font-bold text-white">Dashboard</h2>
+            const slaData = {
+                labels: ['Karşılanan', 'İhlal'],
+                datasets: [{ data: [stats?.slaMetCount || 0, stats?.slaBreachedCount || 0], backgroundColor: ['#10B981', '#EF4444'] }]
+            };
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {statCards.map((stat, i) => (
-                            <div key={i} className={`card rounded-xl p-6 stat-card border ${colorClasses[stat.color]}`}>
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <p className="text-gray-400 text-sm">{stat.label}</p>
-                                        <p className="text-3xl font-bold text-white mt-1">{stat.value}</p>
-                                    </div>
-                                    <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${colorClasses[stat.color]}`}>
-                                        <i className={`${stat.icon} text-xl`}></i>
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
+            const StatCard = ({ icon, label, value, color }) => (
+                <div className="card bg-gray-800 p-6 rounded-xl">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-gray-400 text-sm">{label}</p>
+                            <p className="text-3xl font-bold mt-1">{value ?? '-'}</p>
+                        </div>
+                        <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${color}`}>
+                            <i className={`fas ${icon} text-xl`}></i>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            return (
+                <div>
+                    <h1 className="text-2xl font-bold mb-6">📊 Dashboard</h1>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                        <StatCard icon="fa-ticket" label="Toplam Ticket" value={stats?.totalTickets} color="bg-purple-500/20 text-purple-400"/>
+                        <StatCard icon="fa-clock" label="Açık" value={stats?.openTickets} color="bg-green-500/20 text-green-400"/>
+                        <StatCard icon="fa-check-circle" label="Kapalı" value={stats?.closedTickets} color="bg-blue-500/20 text-blue-400"/>
+                        <StatCard icon="fa-star" label="Ort. Rating" value={stats?.averageRating?.toFixed(1)} color="bg-yellow-500/20 text-yellow-400"/>
                     </div>
 
-                    {stats?.topStaff?.length > 0 && (
-                        <div className="card rounded-xl p-6">
-                            <h3 className="text-lg font-semibold text-white mb-4">🏆 En Aktif Yetkililer</h3>
-                            <div className="space-y-3">
-                                {stats.topStaff.slice(0, 5).map((staff, i) => (
-                                    <div key={i} className="flex items-center justify-between bg-slate-800 rounded-lg p-3">
-                                        <div className="flex items-center gap-3">
-                                            <span className="w-8 h-8 rounded-full bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold">
-                                                {i + 1}
-                                            </span>
-                                            <span className="text-gray-300">{staff.claimedBy}</span>
-                                        </div>
-                                        <span className="text-purple-400 font-semibold">{staff._count.id} ticket</span>
-                                    </div>
-                                ))}
-                            </div>
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                        <div className="lg:col-span-2 bg-gray-800 p-6 rounded-xl">
+                            <h2 className="font-semibold mb-4">📈 Son 14 Gün</h2>
+                            <Chart type="line" data={chartData} options={{ responsive: true, plugins: { legend: { labels: { color: '#9CA3AF' } } }, scales: { x: { ticks: { color: '#9CA3AF' } }, y: { ticks: { color: '#9CA3AF' } } } }}/>
                         </div>
-                    )}
+                        <div className="bg-gray-800 p-6 rounded-xl">
+                            <h2 className="font-semibold mb-4">🎯 SLA Performans</h2>
+                            <Chart type="doughnut" data={slaData} options={{ responsive: true, plugins: { legend: { labels: { color: '#9CA3AF' } } } }}/>
+                        </div>
+                    </div>
+
+                    <div className="bg-gray-800 p-6 rounded-xl">
+                        <h2 className="font-semibold mb-4">🏆 Top Staff</h2>
+                        <div className="space-y-3">
+                            {leaderboard.map((staff, i) => (
+                                <div key={staff.userId} className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-2xl">{['🥇', '🥈', '🥉', '4️⃣', '5️⃣'][i]}</span>
+                                        <span>{staff.username}</span>
+                                    </div>
+                                    <div className="flex items-center gap-4">
+                                        <span className="text-purple-400">Lv.{staff.level}</span>
+                                        <span className="text-green-400">{staff.ticketsClosed} ticket</span>
+                                        <span className="text-yellow-400">{staff.averageRating?.toFixed(1)}⭐</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                 </div>
             );
         }
 
         // Tickets Page
         function TicketsPage() {
-            const { api } = useContext(ApiContext);
+            const { api } = useApi();
             const [tickets, setTickets] = useState([]);
-            const [loading, setLoading] = useState(true);
             const [filter, setFilter] = useState('all');
+            const [search, setSearch] = useState('');
 
             useEffect(() => {
-                const params = filter !== 'all' ? `?status=${filter}` : '';
-                api(`/tickets${params}`).then(data => setTickets(data.tickets)).catch(console.error).finally(() => setLoading(false));
+                const endpoint = filter === 'all' ? '/api/tickets' : `/api/tickets?status=${filter}`;
+                api(endpoint).then(setTickets).catch(console.error);
             }, [filter]);
 
-            const statusColors = {
-                open: 'bg-green-500/20 text-green-400',
-                claimed: 'bg-yellow-500/20 text-yellow-400',
-                closed: 'bg-red-500/20 text-red-400',
-            };
-
-            const priorityLabels = { 1: '🟢 Düşük', 2: '🟡 Orta', 3: '🟠 Yüksek', 4: '🔴 Acil' };
-
-            if (loading) return <LoadingState />;
+            const statusColors = { open: 'bg-green-500', claimed: 'bg-yellow-500', closed: 'bg-red-500' };
+            const filtered = tickets.filter(t => 
+                !search || t.subject?.toLowerCase().includes(search.toLowerCase()) || t.ticketNumber.toString().includes(search)
+            );
 
             return (
-                <div className="space-y-6">
-                    <div className="flex items-center justify-between">
-                        <h2 className="text-2xl font-bold text-white">Ticketlar</h2>
-                        <select 
-                            value={filter} 
-                            onChange={(e) => setFilter(e.target.value)}
-                            className="bg-slate-800 border border-slate-600 rounded-lg px-4 py-2 text-white"
-                        >
-                            <option value="all">Tümü</option>
-                            <option value="open">Açık</option>
-                            <option value="claimed">Sahiplenilmiş</option>
-                            <option value="closed">Kapalı</option>
-                        </select>
+                <div>
+                    <div className="flex justify-between items-center mb-6">
+                        <h1 className="text-2xl font-bold">🎫 Ticketlar</h1>
+                        <div className="flex gap-4">
+                            <input type="text" placeholder="Ara..." value={search} onChange={e => setSearch(e.target.value)}
+                                className="px-4 py-2 rounded-lg bg-gray-700 border border-gray-600"/>
+                            <select value={filter} onChange={e => setFilter(e.target.value)}
+                                className="px-4 py-2 rounded-lg bg-gray-700 border border-gray-600">
+                                <option value="all">Tümü</option>
+                                <option value="open">Açık</option>
+                                <option value="claimed">Sahiplenilmiş</option>
+                                <option value="closed">Kapalı</option>
+                            </select>
+                        </div>
                     </div>
-
-                    <div className="card rounded-xl overflow-hidden">
+                    <div className="bg-gray-800 rounded-xl overflow-hidden">
                         <table className="w-full">
-                            <thead className="bg-slate-800">
+                            <thead className="bg-gray-700">
                                 <tr>
-                                    <th className="text-left text-gray-400 px-6 py-4 font-medium">#</th>
-                                    <th className="text-left text-gray-400 px-6 py-4 font-medium">Kullanıcı</th>
-                                    <th className="text-left text-gray-400 px-6 py-4 font-medium">Durum</th>
-                                    <th className="text-left text-gray-400 px-6 py-4 font-medium">Öncelik</th>
-                                    <th className="text-left text-gray-400 px-6 py-4 font-medium">Sahiplenen</th>
-                                    <th className="text-left text-gray-400 px-6 py-4 font-medium">Tarih</th>
+                                    <th className="text-left p-4">#</th>
+                                    <th className="text-left p-4">Konu</th>
+                                    <th className="text-left p-4">Durum</th>
+                                    <th className="text-left p-4">Öncelik</th>
+                                    <th className="text-left p-4">Tarih</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {tickets.map(ticket => (
-                                    <tr key={ticket.id} className="border-t border-slate-700 hover:bg-slate-800/50">
-                                        <td className="px-6 py-4 text-white font-mono">#{String(ticket.ticketNumber).padStart(4, '0')}</td>
-                                        <td className="px-6 py-4 text-gray-300">{ticket.userId}</td>
-                                        <td className="px-6 py-4">
-                                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${statusColors[ticket.status]}`}>
-                                                {ticket.status}
-                                            </span>
+                                {filtered.slice(0, 50).map(ticket => (
+                                    <tr key={ticket.id} className="border-t border-gray-700 hover:bg-gray-700/50">
+                                        <td className="p-4">#{ticket.ticketNumber.toString().padStart(4, '0')}</td>
+                                        <td className="p-4">{ticket.subject || 'Konu yok'}</td>
+                                        <td className="p-4">
+                                            <span className={`px-2 py-1 rounded text-xs ${statusColors[ticket.status]} bg-opacity-20`}>{ticket.status}</span>
                                         </td>
-                                        <td className="px-6 py-4 text-gray-300">{priorityLabels[ticket.priority]}</td>
-                                        <td className="px-6 py-4 text-gray-300">{ticket.claimedBy || '-'}</td>
-                                        <td className="px-6 py-4 text-gray-400 text-sm">
-                                            {new Date(ticket.createdAt).toLocaleDateString('tr-TR')}
-                                        </td>
+                                        <td className="p-4">{['', '🟢', '🟡', '🟠', '🔴'][ticket.priority]}</td>
+                                        <td className="p-4 text-gray-400">{new Date(ticket.createdAt).toLocaleDateString('tr-TR')}</td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
-
-                        {tickets.length === 0 && (
-                            <div className="text-center py-12 text-gray-500">
-                                <i className="fas fa-ticket-alt text-4xl mb-4 opacity-50"></i>
-                                <p>Ticket bulunamadı</p>
-                            </div>
-                        )}
+                        {filtered.length === 0 && <p className="text-center p-8 text-gray-400">Ticket bulunamadı</p>}
                     </div>
                 </div>
             );
         }
 
-        // Categories Page
-        function CategoriesPage() {
-            const { api } = useContext(ApiContext);
-            const [categories, setCategories] = useState([]);
-            const [loading, setLoading] = useState(true);
+        // Staff Page
+        function StaffPage() {
+            const { api } = useApi();
+            const [staff, setStaff] = useState([]);
 
             useEffect(() => {
-                api('/categories').then(data => setCategories(data.categories)).catch(console.error).finally(() => setLoading(false));
+                api('/api/staff').then(setStaff).catch(console.error);
             }, []);
 
-            if (loading) return <LoadingState />;
-
             return (
-                <div className="space-y-6">
-                    <h2 className="text-2xl font-bold text-white">Kategoriler</h2>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {categories.map(cat => (
-                            <div key={cat.id} className="card rounded-xl p-6">
-                                <div className="flex items-center gap-3 mb-4">
-                                    <span className="text-2xl">{cat.emoji || '🎫'}</span>
-                                    <h3 className="text-lg font-semibold text-white">{cat.name}</h3>
+                <div>
+                    <h1 className="text-2xl font-bold mb-6">👥 Staff</h1>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {staff.map(s => (
+                            <div key={s.id} className="card bg-gray-800 p-6 rounded-xl">
+                                <div className="flex items-center gap-4 mb-4">
+                                    <div className="w-12 h-12 rounded-full bg-purple-500/20 flex items-center justify-center text-xl">
+                                        {s.username?.charAt(0).toUpperCase()}
+                                    </div>
+                                    <div>
+                                        <p className="font-semibold">{s.username}</p>
+                                        <p className="text-sm text-purple-400">Level {s.level}</p>
+                                    </div>
                                 </div>
-                                <p className="text-gray-400 text-sm">{cat.description || 'Açıklama yok'}</p>
-                                <div className="mt-4 flex items-center gap-2">
-                                    <span className={`w-3 h-3 rounded-full ${cat.enabled ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                                    <span className="text-gray-500 text-sm">{cat.enabled ? 'Aktif' : 'Devre Dışı'}</span>
+                                <div className="grid grid-cols-2 gap-4 text-sm">
+                                    <div className="bg-gray-700/50 p-3 rounded-lg">
+                                        <p className="text-gray-400">XP</p>
+                                        <p className="font-bold text-purple-400">{s.xp}</p>
+                                    </div>
+                                    <div className="bg-gray-700/50 p-3 rounded-lg">
+                                        <p className="text-gray-400">Ticketlar</p>
+                                        <p className="font-bold text-green-400">{s.ticketsClosed}</p>
+                                    </div>
+                                    <div className="bg-gray-700/50 p-3 rounded-lg">
+                                        <p className="text-gray-400">Rating</p>
+                                        <p className="font-bold text-yellow-400">{s.averageRating?.toFixed(1)}⭐</p>
+                                    </div>
+                                    <div className="bg-gray-700/50 p-3 rounded-lg">
+                                        <p className="text-gray-400">Seri</p>
+                                        <p className="font-bold text-orange-400">{s.currentStreak} 🔥</p>
+                                    </div>
                                 </div>
                             </div>
                         ))}
                     </div>
-
-                    {categories.length === 0 && (
-                        <div className="card rounded-xl p-12 text-center text-gray-500">
-                            <i className="fas fa-folder-open text-4xl mb-4 opacity-50"></i>
-                            <p>Henüz kategori oluşturulmamış</p>
-                        </div>
-                    )}
                 </div>
             );
         }
 
-        // Canned Responses Page
-        function CannedPage() {
-            const { api } = useContext(ApiContext);
-            const [responses, setResponses] = useState([]);
-            const [loading, setLoading] = useState(true);
+        // KB Page
+        function KBPage() {
+            const { api } = useApi();
+            const [articles, setArticles] = useState([]);
 
             useEffect(() => {
-                api('/canned').then(data => setResponses(data.responses)).catch(console.error).finally(() => setLoading(false));
+                api('/api/kb').then(setArticles).catch(console.error);
             }, []);
 
-            if (loading) return <LoadingState />;
-
             return (
-                <div className="space-y-6">
-                    <h2 className="text-2xl font-bold text-white">Hazır Yanıtlar</h2>
-
-                    <div className="space-y-4">
-                        {responses.map(res => (
-                            <div key={res.id} className="card rounded-xl p-6">
-                                <div className="flex items-center justify-between mb-3">
-                                    <h3 className="text-lg font-semibold text-purple-400">{res.name}</h3>
-                                    <span className="text-gray-500 text-sm">{res.useCount} kullanım</span>
+                <div>
+                    <h1 className="text-2xl font-bold mb-6">📚 Bilgi Bankası</h1>
+                    <div className="grid gap-4">
+                        {articles.map(a => (
+                            <div key={a.id} className="card bg-gray-800 p-6 rounded-xl">
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <h3 className="font-semibold text-lg">{a.pinned && '📌 '}{a.title}</h3>
+                                        <p className="text-gray-400 mt-2">{a.content?.substring(0, 150)}...</p>
+                                    </div>
+                                    <div className="flex gap-4 text-sm text-gray-400">
+                                        <span>👁️ {a.viewCount}</span>
+                                        <span>👍 {a.helpfulCount}</span>
+                                    </div>
                                 </div>
-                                <p className="text-gray-300 bg-slate-800 rounded-lg p-4">{res.content}</p>
+                                {a.tags && <div className="mt-4 flex gap-2">{a.tags.split(',').map(t => <span key={t} className="px-2 py-1 bg-purple-500/20 text-purple-300 rounded text-xs">{t.trim()}</span>)}</div>}
                             </div>
                         ))}
+                        {articles.length === 0 && <p className="text-center p-8 text-gray-400">Henüz makale yok</p>}
                     </div>
-
-                    {responses.length === 0 && (
-                        <div className="card rounded-xl p-12 text-center text-gray-500">
-                            <i className="fas fa-comment-dots text-4xl mb-4 opacity-50"></i>
-                            <p>Henüz hazır yanıt oluşturulmamış</p>
-                        </div>
-                    )}
                 </div>
             );
         }
 
         // Settings Page
         function SettingsPage() {
-            const { api } = useContext(ApiContext);
+            const { api } = useApi();
             const [guild, setGuild] = useState(null);
-            const [loading, setLoading] = useState(true);
 
             useEffect(() => {
-                api('/guild').then(setGuild).catch(console.error).finally(() => setLoading(false));
+                api('/api/guild').then(setGuild).catch(console.error);
             }, []);
 
-            if (loading) return <LoadingState />;
-
-            return (
-                <div className="space-y-6">
-                    <h2 className="text-2xl font-bold text-white">Ayarlar</h2>
-
-                    <div className="card rounded-xl p-6 space-y-6">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div>
-                                <label className="block text-gray-400 text-sm mb-2">Sunucu Adı</label>
-                                <input 
-                                    type="text" 
-                                    value={guild?.name || ''} 
-                                    disabled
-                                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 text-white opacity-50"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-gray-400 text-sm mb-2">Dil</label>
-                                <input 
-                                    type="text" 
-                                    value={guild?.locale === 'en' ? 'English' : 'Türkçe'} 
-                                    disabled
-                                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 text-white opacity-50"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-gray-400 text-sm mb-2">Max Ticket/Kullanıcı</label>
-                                <input 
-                                    type="number" 
-                                    value={guild?.maxTicketsPerUser || 3} 
-                                    disabled
-                                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 text-white opacity-50"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-gray-400 text-sm mb-2">Auto-Close (saat)</label>
-                                <input 
-                                    type="number" 
-                                    value={guild?.autoCloseHours || 48} 
-                                    disabled
-                                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 text-white opacity-50"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="pt-4 border-t border-slate-700">
-                            <p className="text-gray-500 text-sm">
-                                <i className="fas fa-info-circle mr-2"></i>
-                                Ayarları değiştirmek için Discord'da <code className="text-purple-400">/settings</code> komutunu kullanın
-                            </p>
-                        </div>
-                    </div>
+            const Setting = ({ label, value }) => (
+                <div className="flex justify-between p-4 bg-gray-700/50 rounded-lg">
+                    <span className="text-gray-400">{label}</span>
+                    <span>{value}</span>
                 </div>
             );
-        }
-
-        // Loading State
-        function LoadingState() {
-            return (
-                <div className="flex items-center justify-center h-64">
-                    <div className="text-center">
-                        <i className="fas fa-spinner fa-spin text-4xl text-purple-500 mb-4"></i>
-                        <p className="text-gray-400">Yükleniyor...</p>
-                    </div>
-                </div>
-            );
-        }
-
-        // Main Dashboard
-        function Dashboard() {
-            const [activePage, setActivePage] = useState('dashboard');
-
-            const pages = {
-                dashboard: <DashboardPage />,
-                tickets: <TicketsPage />,
-                categories: <CategoriesPage />,
-                canned: <CannedPage />,
-                settings: <SettingsPage />,
-            };
 
             return (
-                <div className="flex min-h-screen">
-                    <Sidebar active={activePage} setActive={setActivePage} />
-                    <main className="flex-1 p-8">
-                        {pages[activePage]}
-                    </main>
+                <div>
+                    <h1 className="text-2xl font-bold mb-6">⚙️ Ayarlar</h1>
+                    {guild && (
+                        <div className="bg-gray-800 p-6 rounded-xl space-y-3">
+                            <Setting label="Sunucu" value={guild.name}/>
+                            <Setting label="Dil" value={guild.locale?.toUpperCase()}/>
+                            <Setting label="Timezone" value={guild.timezone}/>
+                            <Setting label="Max Ticket/Kullanıcı" value={guild.maxTicketsPerUser}/>
+                            <Setting label="Otomatik Kapama" value={`${guild.autoCloseHours} saat`}/>
+                            <Setting label="SLA" value={guild.slaEnabled ? '✅ Aktif' : '❌ Deaktif'}/>
+                            <Setting label="AI" value={guild.aiEnabled ? '✅ Aktif' : '❌ Deaktif'}/>
+                            <Setting label="Auto-Assign" value={guild.autoAssignEnabled ? `✅ ${guild.autoAssignMode}` : '❌ Deaktif'}/>
+                            <Setting label="Çalışma Saatleri" value={guild.businessHoursEnabled ? `✅ ${guild.businessHoursStart}-${guild.businessHoursEnd}` : '❌ Deaktif'}/>
+                        </div>
+                    )}
                 </div>
             );
         }
 
         // Main App
         function App() {
-            const { connected } = useContext(ApiContext);
-            return connected ? <Dashboard /> : <Login />;
+            const { isAuth } = useApi();
+            const [page, setPage] = useState('dashboard');
+
+            if (!isAuth) return <LoginPage/>;
+
+            const pages = { dashboard: DashboardPage, tickets: TicketsPage, staff: StaffPage, kb: KBPage, settings: SettingsPage };
+            const Page = pages[page] || DashboardPage;
+
+            return (
+                <div className="flex">
+                    <Sidebar active={page} setActive={setPage}/>
+                    <main className="ml-64 flex-1 p-8 min-h-screen">
+                        <Page/>
+                    </main>
+                </div>
+            );
         }
 
         // Render
-        ReactDOM.render(
-            <ApiProvider>
-                <App />
-            </ApiProvider>,
-            document.getElementById('root')
+        ReactDOM.createRoot(document.getElementById('app')).render(
+            <ApiProvider><App/></ApiProvider>
         );
     </script>
 </body>

@@ -1,114 +1,237 @@
 import { EmbedBuilder } from 'discord.js';
-import { ticketDB, guildDB } from './database.js';
-import { generateTranscript } from './transcript.js';
-import { notifyTicketClosed } from './notifications.js';
+import { ticketDB, guildDB, dailyStatsDB, reminderDB, staffDB, statsDB } from './database.js';
 import logger from './logger.js';
 
-const scheduledCloses = new Map();
+let client = null;
+let intervals = [];
 
-export function scheduleClose(channelId, closeTime, userId, reason = null) {
-    cancelScheduledClose(channelId);
+export function startScheduler(discordClient) {
+    client = discordClient;
 
-    const delay = closeTime.getTime() - Date.now();
-    if (delay <= 0) return;
+    // Clear old intervals
+    intervals.forEach(clearInterval);
+    intervals = [];
 
-    const timeout = setTimeout(async () => {
-        await executeScheduledClose(channelId, userId, reason);
-    }, delay);
-
-    scheduledCloses.set(channelId, { timeout, closeTime, userId, reason });
-    logger.info(`Scheduled close for ${channelId} at ${closeTime.toISOString()}`);
+    // Auto-close check (every 30 minutes)
+    intervals.push(setInterval(checkAutoClose, 30 * 60 * 1000));
+    
+    // Scheduled close check (every minute)
+    intervals.push(setInterval(checkScheduledClose, 60 * 1000));
+    
+    // Reminder check (every minute)
+    intervals.push(setInterval(checkReminders, 60 * 1000));
+    
+    // Daily stats recording (every hour)
+    intervals.push(setInterval(recordDailyStats, 60 * 60 * 1000));
+    
+    // Daily reset (midnight)
+    scheduleDailyReset();
+    
+    logger.info('⏰ Scheduler started with all tasks');
 }
 
-export function cancelScheduledClose(channelId) {
-    const scheduled = scheduledCloses.get(channelId);
-    if (scheduled) {
-        clearTimeout(scheduled.timeout);
-        scheduledCloses.delete(channelId);
-        logger.info(`Cancelled scheduled close for ${channelId}`);
-    }
-}
+async function checkAutoClose() {
+    if (!client) return;
 
-async function executeScheduledClose(channelId, userId, reason) {
     try {
-        const ticket = await ticketDB.get(channelId);
-        if (!ticket || ticket.status === 'closed') {
-            scheduledCloses.delete(channelId);
-            return;
-        }
+        const guilds = await client.guilds.fetch();
+        
+        for (const [guildId, guild] of guilds) {
+            const guildConfig = await guildDB.getOrCreate(guildId, guild.name);
+            if (!guildConfig.autoCloseHours || guildConfig.autoCloseHours <= 0) continue;
 
-        const client = global.discordClient;
-        if (!client) return;
+            const inactiveTickets = await ticketDB.getInactiveTickets(guildConfig.autoCloseHours);
+            
+            for (const ticket of inactiveTickets) {
+                if (ticket.guildId !== guildId) continue;
 
-        const guild = await client.guilds.fetch(ticket.guildId).catch(() => null);
-        if (!guild) {
-            scheduledCloses.delete(channelId);
-            return;
-        }
+                try {
+                    const fullGuild = await client.guilds.fetch(guildId);
+                    const channel = await fullGuild.channels.fetch(ticket.channelId).catch(() => null);
+                    
+                    if (!channel) continue;
 
-        const channel = await guild.channels.fetch(channelId).catch(() => null);
-        if (!channel) {
-            await ticketDB.close(channelId, 'SYSTEM', 'Channel deleted');
-            scheduledCloses.delete(channelId);
-            return;
-        }
+                    // Send warning
+                    const embed = new EmbedBuilder()
+                        .setColor('#FEE75C')
+                        .setTitle('⏰ Otomatik Kapatma Uyarısı')
+                        .setDescription(`Bu ticket ${guildConfig.autoCloseHours} saattir aktif değil ve otomatik olarak kapatılacak.`)
+                        .setTimestamp();
 
-        // Generate transcript
-        let transcriptUrl = null;
-        try {
-            transcriptUrl = await generateTranscript(channel, ticket);
-        } catch (e) {
-            logger.error('Transcript error:', e);
-        }
+                    await channel.send({ embeds: [embed] });
+                    
+                    // Close after 5 minutes
+                    setTimeout(async () => {
+                        await ticketDB.close(ticket.channelId, client.user.id, 'Otomatik kapatma (inaktivite)');
+                        await channel.delete().catch(() => {});
+                        logger.info(`Auto-closed ticket #${ticket.ticketNumber} (inactivity)`);
+                    }, 5 * 60 * 1000);
 
-        // Close in database
-        await ticketDB.close(channelId, userId || 'SYSTEM', reason || 'Scheduled close', transcriptUrl);
-
-        // Send close message
-        const embed = new EmbedBuilder()
-            .setColor('#ED4245')
-            .setTitle('🔒 Ticket Kapatıldı (Zamanlanmış)')
-            .setDescription('5 saniye içinde kanal silinecek...')
-            .setTimestamp();
-
-        await channel.send({ embeds: [embed] });
-
-        // Notify
-        await notifyTicketClosed(client, ticket, guild, null, reason);
-
-        // Delete channel
-        setTimeout(async () => {
-            try {
-                await channel.delete();
-            } catch (e) {}
-        }, 5000);
-
-        scheduledCloses.delete(channelId);
-        logger.info(`Scheduled close executed for ticket #${ticket.ticketNumber}`);
-
-    } catch (error) {
-        logger.error('Scheduled close error:', error);
-        scheduledCloses.delete(channelId);
-    }
-}
-
-export async function loadScheduledCloses() {
-    try {
-        const tickets = await ticketDB.getScheduledTickets();
-        for (const ticket of tickets) {
-            if (ticket.scheduledCloseAt) {
-                const closeTime = new Date(ticket.scheduledCloseAt);
-                if (closeTime > new Date()) {
-                    scheduleClose(ticket.channelId, closeTime, ticket.scheduledCloseBy, ticket.scheduledCloseReason);
-                } else {
-                    await executeScheduledClose(ticket.channelId, ticket.scheduledCloseBy, ticket.scheduledCloseReason);
+                } catch (error) {
+                    logger.error(`Auto-close error for ticket ${ticket.id}:`, error);
                 }
             }
         }
-        logger.info(`Loaded ${scheduledCloses.size} scheduled closes`);
     } catch (error) {
-        logger.error('Load scheduled closes error:', error);
+        logger.error('Auto-close check error:', error);
     }
 }
 
-export default { scheduleClose, cancelScheduledClose, loadScheduledCloses };
+async function checkScheduledClose() {
+    if (!client) return;
+
+    try {
+        const tickets = await ticketDB.getScheduledTickets();
+        const now = new Date();
+
+        for (const ticket of tickets) {
+            if (!ticket.scheduledCloseAt || new Date(ticket.scheduledCloseAt) > now) continue;
+
+            try {
+                const guild = await client.guilds.fetch(ticket.guildId).catch(() => null);
+                if (!guild) continue;
+
+                const channel = await guild.channels.fetch(ticket.channelId).catch(() => null);
+                if (!channel) continue;
+
+                const embed = new EmbedBuilder()
+                    .setColor('#ED4245')
+                    .setTitle('🔒 Zamanlı Kapatma')
+                    .setDescription(ticket.scheduledCloseReason || 'Zamanlanmış kapatma süresi doldu.')
+                    .setTimestamp();
+
+                await channel.send({ embeds: [embed] });
+                
+                await ticketDB.close(
+                    ticket.channelId, 
+                    ticket.scheduledCloseBy || client.user.id, 
+                    ticket.scheduledCloseReason || 'Zamanlanmış kapatma'
+                );
+
+                setTimeout(() => channel.delete().catch(() => {}), 10000);
+                
+                logger.info(`Scheduled close: ticket #${ticket.ticketNumber}`);
+
+            } catch (error) {
+                logger.error(`Scheduled close error for ticket ${ticket.id}:`, error);
+            }
+        }
+    } catch (error) {
+        logger.error('Scheduled close check error:', error);
+    }
+}
+
+async function checkReminders() {
+    if (!client) return;
+
+    try {
+        const dueReminders = await reminderDB.getDue();
+
+        for (const reminder of dueReminders) {
+            try {
+                const guild = await client.guilds.fetch(reminder.guildId).catch(() => null);
+                if (!guild) continue;
+
+                const channel = await guild.channels.fetch(reminder.channelId).catch(() => null);
+                if (!channel) continue;
+
+                const embed = new EmbedBuilder()
+                    .setColor('#5865F2')
+                    .setTitle('⏰ Hatırlatma')
+                    .setDescription(reminder.message || 'Hatırlatma!')
+                    .addFields({ name: '👤 Oluşturan', value: `<@${reminder.userId}>`, inline: true })
+                    .setTimestamp();
+
+                await channel.send({
+                    content: `<@${reminder.userId}>`,
+                    embeds: [embed],
+                });
+
+                await reminderDB.markComplete(reminder.id);
+                
+                logger.debug(`Reminder sent for ticket in channel ${reminder.channelId}`);
+
+            } catch (error) {
+                logger.error(`Reminder error for ${reminder.id}:`, error);
+                await reminderDB.markComplete(reminder.id);
+            }
+        }
+    } catch (error) {
+        logger.error('Reminder check error:', error);
+    }
+}
+
+async function recordDailyStats() {
+    if (!client) return;
+
+    try {
+        const guilds = await client.guilds.fetch();
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        for (const [guildId, guild] of guilds) {
+            try {
+                // Get today's tickets
+                const allTickets = await ticketDB.getAllTickets(guildId);
+                const todayTickets = allTickets.filter(t => new Date(t.createdAt) >= today);
+                const todayClosed = allTickets.filter(t => t.closedAt && new Date(t.closedAt) >= today);
+
+                // Calculate averages
+                const ratings = todayClosed.filter(t => t.rating).map(t => t.rating);
+                const avgRating = ratings.length > 0 ? ratings.reduce((a, b) => a + b, 0) / ratings.length : null;
+
+                // Record stats
+                await dailyStatsDB.recordDaily(guildId, {
+                    ticketsOpened: todayTickets.length,
+                    ticketsClosed: todayClosed.length,
+                    avgRating,
+                });
+
+            } catch (error) {
+                logger.error(`Daily stats error for guild ${guildId}:`, error);
+            }
+        }
+
+        logger.debug('Daily stats recorded');
+
+    } catch (error) {
+        logger.error('Record daily stats error:', error);
+    }
+}
+
+function scheduleDailyReset() {
+    const now = new Date();
+    const midnight = new Date(now);
+    midnight.setHours(24, 0, 0, 0);
+    
+    const msUntilMidnight = midnight.getTime() - now.getTime();
+
+    setTimeout(async () => {
+        // Reset daily counters
+        logger.info('🌙 Daily reset running...');
+        
+        try {
+            // Reset staff loads
+            const guilds = await client.guilds.fetch();
+            for (const [guildId, guild] of guilds) {
+                await staffDB.resetAllLoads(guildId);
+            }
+            logger.info('Staff loads reset');
+        } catch (error) {
+            logger.error('Daily reset error:', error);
+        }
+
+        // Schedule next reset
+        scheduleDailyReset();
+    }, msUntilMidnight);
+
+    logger.debug(`Next daily reset in ${Math.round(msUntilMidnight / 1000 / 60)} minutes`);
+}
+
+export function stopScheduler() {
+    intervals.forEach(clearInterval);
+    intervals = [];
+    logger.info('Scheduler stopped');
+}
+
+export default { startScheduler, stopScheduler };
