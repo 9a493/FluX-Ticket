@@ -1,81 +1,133 @@
-import { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, PermissionFlagsBits } from 'discord.js';
-import { guildDB, categoryDB, templateDB } from '../../utils/database.js';
+import { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ChannelType } from 'discord.js';
+import { guildDB } from '../../utils/database.js';
 import logger from '../../utils/logger.js';
 
 export default {
     data: new SlashCommandBuilder()
         .setName('panel')
-        .setDescription('Ticket paneli yönetimi')
-        .addSubcommand(s => s.setName('send').setDescription('Panel gönder')
-            .addChannelOption(o => o.setName('kanal').setDescription('Panel kanalı')))
-        .addSubcommand(s => s.setName('categories').setDescription('Kategori paneli gönder'))
-        .addSubcommand(s => s.setName('templates').setDescription('Şablon paneli gönder'))
+        .setDescription('Ticket paneli gönderir')
+        .addChannelOption(option =>
+            option.setName('kanal')
+                .setDescription('Panel gönderilecek kanal')
+                .setRequired(false)
+                .addChannelTypes(ChannelType.GuildText)
+        )
+        .addStringOption(option =>
+            option.setName('başlık')
+                .setDescription('Panel başlığı')
+                .setRequired(false)
+                .setMaxLength(100)
+        )
+        .addStringOption(option =>
+            option.setName('açıklama')
+                .setDescription('Panel açıklaması')
+                .setRequired(false)
+                .setMaxLength(1000)
+        )
+        .addStringOption(option =>
+            option.setName('renk')
+                .setDescription('Embed rengi (hex)')
+                .setRequired(false)
+        )
+        .addStringOption(option =>
+            option.setName('buton')
+                .setDescription('Buton metni')
+                .setRequired(false)
+                .setMaxLength(50)
+        )
+        .addBooleanOption(option =>
+            option.setName('modal')
+                .setDescription('Ticket açarken modal formu göster?')
+                .setRequired(false)
+        )
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     async execute(interaction) {
         await interaction.deferReply({ ephemeral: true });
 
-        const sub = interaction.options.getSubcommand();
-        const guildConfig = await guildDB.getOrCreate(interaction.guild.id, interaction.guild.name);
-        const channel = interaction.options.getChannel('kanal') || interaction.channel;
+        const targetChannel = interaction.options.getChannel('kanal') || interaction.channel;
+        const customTitle = interaction.options.getString('başlık');
+        const customDescription = interaction.options.getString('açıklama');
+        const customColor = interaction.options.getString('renk');
+        const customButton = interaction.options.getString('buton');
+        const useModal = interaction.options.getBoolean('modal') ?? true;
 
-        if (sub === 'send') {
+        try {
+            const guildConfig = await guildDB.getOrCreate(interaction.guild.id, interaction.guild.name);
+
+            // Varsayılan değerler
+            const title = customTitle || '🎫 Destek Ticket Sistemi';
+            const description = customDescription || 
+                '**Nasıl ticket açarım?**\n' +
+                'Aşağıdaki butona tıklayarak yeni bir destek talebi oluşturabilirsiniz.\n\n' +
+                '**Ne zaman ticket açmalıyım?**\n' +
+                '• Sorununuz olduğunda\n' +
+                '• Yardıma ihtiyacınız olduğunda\n' +
+                '• Şikayet veya öneriniz olduğunda\n\n' +
+                '**Kurallar:**\n' +
+                '• Gereksiz ticket açmayın\n' +
+                '• Yetkililere saygılı olun\n' +
+                '• Konunuzu açık ve net bir şekilde anlatın';
+            
+            const color = customColor?.replace('#', '') || '5865F2';
+            const buttonText = customButton || 'Ticket Oluştur';
+
+            // Embed oluştur
             const embed = new EmbedBuilder()
-                .setColor('#5865F2')
-                .setTitle('🎫 Destek Talebi')
-                .setDescription('Destek almak için aşağıdaki butona tıklayın.\n\nTicket açmadan önce:\n• Sorununuzu detaylı açıklayın\n• Sabırlı olun, en kısa sürede yanıt vereceğiz')
-                .setImage('https://i.imgur.com/7WdehGN.png')
-                .setFooter({ text: 'FluX Ticket • Destek Sistemi' });
+                .setColor(`#${color}`)
+                .setTitle(title)
+                .setDescription(description)
+                .setFooter({ text: interaction.guild.name, iconURL: interaction.guild.iconURL() })
+                .setTimestamp();
 
-            const button = new ActionRowBuilder().addComponents(
+            // Thumbnail ekle (varsa)
+            if (interaction.guild.iconURL()) {
+                embed.setThumbnail(interaction.guild.iconURL({ size: 256 }));
+            }
+
+            // Buton oluştur
+            const buttonId = useModal ? 'create_ticket_modal' : 'create_ticket';
+            
+            const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
-                    .setCustomId('create_ticket')
-                    .setLabel('🎫 Ticket Aç')
-                    .setStyle(ButtonStyle.Primary),
+                    .setCustomId(buttonId)
+                    .setLabel(buttonText)
+                    .setStyle(ButtonStyle.Primary)
+                    .setEmoji('🎫'),
             );
 
-            const msg = await channel.send({ embeds: [embed], components: [button] });
-            await guildDB.update(interaction.guild.id, { panelChannelId: channel.id, panelMessageId: msg.id });
-            await interaction.editReply({ content: `✅ Panel ${channel} kanalına gönderildi!` });
+            // Paneli gönder
+            const panelMessage = await targetChannel.send({
+                embeds: [embed],
+                components: [row],
+            });
 
-        } else if (sub === 'categories') {
-            const categories = await categoryDB.getAll(interaction.guild.id);
-            if (categories.length === 0) return interaction.editReply({ content: '❌ Önce kategori ekleyin!' });
+            // Database'e kaydet
+            await guildDB.update(interaction.guild.id, {
+                panelChannelId: targetChannel.id,
+                panelMessageId: panelMessage.id,
+            });
 
-            const embed = new EmbedBuilder()
-                .setColor('#5865F2')
-                .setTitle('🎫 Destek Talebi')
-                .setDescription('Aşağıdan bir kategori seçerek ticket oluşturun.')
-                .addFields(categories.map(c => ({ name: `${c.emoji || '📁'} ${c.name}`, value: c.description || 'Açıklama yok', inline: true })));
+            // Onay mesajı
+            const successEmbed = new EmbedBuilder()
+                .setColor('#57F287')
+                .setTitle('✅ Panel Gönderildi')
+                .setDescription(`Ticket paneli ${targetChannel} kanalına gönderildi.`)
+                .addFields(
+                    { name: '📍 Kanal', value: `${targetChannel}`, inline: true },
+                    { name: '📝 Modal', value: useModal ? 'Açık' : 'Kapalı', inline: true },
+                )
+                .setTimestamp();
 
-            const select = new ActionRowBuilder().addComponents(
-                new StringSelectMenuBuilder()
-                    .setCustomId('category_select')
-                    .setPlaceholder('Kategori seçin...')
-                    .addOptions(categories.map(c => ({ label: c.name, value: c.id, emoji: c.emoji || '📁', description: c.description?.substring(0, 50) }))),
-            );
+            await interaction.editReply({ embeds: [successEmbed] });
 
-            await channel.send({ embeds: [embed], components: [select] });
-            await interaction.editReply({ content: '✅ Kategori paneli gönderildi!' });
+            logger.info(`Ticket panel sent to ${targetChannel.name} in ${interaction.guild.name}`);
 
-        } else if (sub === 'templates') {
-            const templates = await templateDB.getAll(interaction.guild.id);
-            if (templates.length === 0) return interaction.editReply({ content: '❌ Önce şablon ekleyin!' });
-
-            const embed = new EmbedBuilder()
-                .setColor('#5865F2')
-                .setTitle('🎫 Destek Talebi')
-                .setDescription('Aşağıdan bir şablon seçerek ticket oluşturun.');
-
-            const select = new ActionRowBuilder().addComponents(
-                new StringSelectMenuBuilder()
-                    .setCustomId('template_select')
-                    .setPlaceholder('Şablon seçin...')
-                    .addOptions(templates.map(t => ({ label: t.name, value: t.id, emoji: t.emoji || '📋', description: t.description?.substring(0, 50) }))),
-            );
-
-            await channel.send({ embeds: [embed], components: [select] });
-            await interaction.editReply({ content: '✅ Şablon paneli gönderildi!' });
+        } catch (error) {
+            logger.error('Panel command hatası:', error);
+            await interaction.editReply({
+                content: '❌ Panel gönderilirken bir hata oluştu!',
+            });
         }
     },
 };

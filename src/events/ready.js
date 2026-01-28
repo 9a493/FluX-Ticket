@@ -5,24 +5,41 @@ export default {
     name: Events.ClientReady,
     once: true,
     async execute(client) {
-        logger.info(`🚀 Logged in as ${client.user.tag}`);
-        logger.info(`📊 Serving ${client.guilds.cache.size} guilds`);
+        logger.info(`✅ Bot hazır! ${client.user.tag} olarak giriş yapıldı`);
+        logger.info(`📊 ${client.guilds.cache.size} sunucuda aktif`);
+        logger.info(`👥 ${client.users.cache.size} kullanıcıya hizmet veriyor`);
 
-        // Set activity
-        client.user.setActivity('🎫 Ticket yönetimi', { type: ActivityType.Watching });
-
-        // Rotate activity every 30 seconds
+        // Bot aktivitesi - döngülü
         const activities = [
-            { name: '🎫 Ticket yönetimi', type: ActivityType.Watching },
+            { name: '/help ile komutlara bak', type: ActivityType.Playing },
             { name: `${client.guilds.cache.size} sunucu`, type: ActivityType.Watching },
-            { name: '/help | FluX Ticket', type: ActivityType.Playing },
-            { name: 'v3.0 MEGA Edition', type: ActivityType.Playing },
+            { name: 'Ticket Sistemi', type: ActivityType.Competing },
+            { name: 'Destek taleplerini', type: ActivityType.Listening },
         ];
 
-        let i = 0;
-        setInterval(() => {
-            i = (i + 1) % activities.length;
-            client.user.setActivity(activities[i].name, { type: activities[i].type });
-        }, 30000);
+        let activityIndex = 0;
+        const updateActivity = () => {
+            client.user.setActivity(activities[activityIndex]);
+            activityIndex = (activityIndex + 1) % activities.length;
+        };
+
+        // İlk aktiviteyi ayarla
+        updateActivity();
+
+        // Her 30 saniyede bir değiştir
+        setInterval(updateActivity, 30000);
+
+        // Bot durumu
+        client.user.setStatus('online');
+
+        // Shard bilgisi (sharding aktifse)
+        if (client.shard) {
+            logger.info(`🔷 Shard ID: ${client.shard.ids[0]}`);
+        }
+
+        // Sunucu bilgilerini logla
+        client.guilds.cache.forEach(guild => {
+            logger.info(`   📍 ${guild.name} (${guild.memberCount} üye)`);
+        });
     },
 };

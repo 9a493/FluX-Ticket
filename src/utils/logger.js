@@ -1,38 +1,89 @@
 import winston from 'winston';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
+import { existsSync, mkdirSync } from 'fs';
 
-const { combine, timestamp, printf, colorize, errors } = winston.format;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
-const logFormat = printf(({ level, message, timestamp, stack }) => {
-    return `${timestamp} [${level}]: ${stack || message}`;
+// Logs klasörünü oluştur
+const logsDir = join(__dirname, '../../logs');
+if (!existsSync(logsDir)) {
+    mkdirSync(logsDir, { recursive: true });
+}
+
+// Custom format
+const customFormat = winston.format.printf(({ timestamp, level, message, ...meta }) => {
+    let msg = `${timestamp} [${level.toUpperCase()}]: ${message}`;
+    
+    // Meta bilgileri ekle
+    if (Object.keys(meta).length > 0 && meta.service === undefined) {
+        msg += ` ${JSON.stringify(meta)}`;
+    }
+    
+    return msg;
 });
 
+// Logger oluştur
 const logger = winston.createLogger({
     level: process.env.LOG_LEVEL || 'info',
-    format: combine(
-        errors({ stack: true }),
-        timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-        logFormat
+    format: winston.format.combine(
+        winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+        winston.format.errors({ stack: true }),
+        winston.format.splat()
     ),
+    defaultMeta: { service: 'flux-ticket' },
     transports: [
-        new winston.transports.Console({
-            format: combine(
-                colorize(),
-                timestamp({ format: 'HH:mm:ss' }),
-                logFormat
-            ),
-        }),
+        // Error logları
         new winston.transports.File({ 
-            filename: 'logs/error.log', 
+            filename: join(logsDir, 'error.log'), 
             level: 'error',
-            maxsize: 5242880,
+            format: winston.format.combine(
+                winston.format.timestamp(),
+                winston.format.json()
+            ),
+            maxsize: 5242880, // 5MB
             maxFiles: 5,
         }),
+        // Tüm loglar
         new winston.transports.File({ 
-            filename: 'logs/combined.log',
-            maxsize: 5242880,
+            filename: join(logsDir, 'combined.log'),
+            format: winston.format.combine(
+                winston.format.timestamp(),
+                winston.format.json()
+            ),
+            maxsize: 5242880, // 5MB
             maxFiles: 5,
         }),
     ],
 });
+
+// Development/Production modunda console'a yazdır
+if (process.env.NODE_ENV !== 'test') {
+    logger.add(new winston.transports.Console({
+        format: winston.format.combine(
+            winston.format.colorize({ all: true }),
+            winston.format.timestamp({ format: 'HH:mm:ss' }),
+            customFormat
+        ),
+    }));
+}
+
+// Unhandled rejection ve exception logging
+logger.exceptions.handle(
+    new winston.transports.File({ 
+        filename: join(logsDir, 'exceptions.log'),
+        maxsize: 5242880,
+        maxFiles: 3,
+    })
+);
+
+logger.rejections.handle(
+    new winston.transports.File({ 
+        filename: join(logsDir, 'rejections.log'),
+        maxsize: 5242880,
+        maxFiles: 3,
+    })
+);
 
 export default logger;

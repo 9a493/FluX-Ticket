@@ -1,352 +1,317 @@
 import express from 'express';
-import cors from 'cors';
-import { guildDB, ticketDB, categoryDB, cannedDB, statsDB, staffDB, apiKeyDB, dailyStatsDB, templateDB, noteDB } from './utils/database.js';
-import { getAuditLogs } from './utils/auditLog.js';
-import { getLeaderboard } from './utils/gamification.js';
-import * as kb from './utils/knowledgeBase.js';
-import * as triggers from './utils/triggers.js';
+import { guildDB, ticketDB, statsDB, categoryDB, cannedDB, apiKeyDB } from './utils/database.js';
 import logger from './utils/logger.js';
 
 const app = express();
-app.use(cors());
+const PORT = process.env.PORT || 3000;
+const API_PREFIX = '/api/v1';
+
+// Middleware
 app.use(express.json());
 
-// Auth Middleware
+// CORS
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+    }
+    next();
+});
+
+// API Key Authentication Middleware
 async function authenticate(req, res, next) {
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-        return res.status(401).json({ error: 'Authorization header required' });
-    }
     
-    const apiKey = await apiKeyDB.validate(authHeader.slice(7));
-    if (!apiKey) {
-        return res.status(401).json({ error: 'Invalid API key' });
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Unauthorized', message: 'API key required' });
     }
-    
-    req.guildId = apiKey.guildId;
-    req.apiKey = apiKey;
+
+    const apiKey = authHeader.substring(7);
+    const keyData = await apiKeyDB.validate(apiKey);
+
+    if (!keyData) {
+        return res.status(401).json({ error: 'Unauthorized', message: 'Invalid or expired API key' });
+    }
+
+    req.apiKey = keyData;
+    req.guildId = keyData.guildId;
     next();
 }
 
+// Check permission middleware
+function requirePermission(permission) {
+    return (req, res, next) => {
+        const permissions = req.apiKey.permissions.split(',');
+        if (permissions.includes('admin') || permissions.includes(permission)) {
+            return next();
+        }
+        return res.status(403).json({ error: 'Forbidden', message: `Permission '${permission}' required` });
+    };
+}
+
+// ==================== HEALTH ====================
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString(),
+        version: '2.0.0'
+    });
+});
+
+app.get('/', (req, res) => {
+    res.json({
+        name: 'FluX Ticket Bot API',
+        version: '2.0.0',
+        docs: '/api/v1/docs'
+    });
+});
+
+// ==================== API DOCS ====================
+app.get(`${API_PREFIX}/docs`, (req, res) => {
+    res.json({
+        version: '2.0.0',
+        baseUrl: API_PREFIX,
+        authentication: 'Bearer token in Authorization header',
+        endpoints: {
+            guild: {
+                'GET /guild': 'Get guild settings',
+                'PUT /guild': 'Update guild settings'
+            },
+            tickets: {
+                'GET /tickets': 'List tickets (query: status, userId, limit)',
+                'GET /tickets/:id': 'Get ticket by ID',
+                'GET /tickets/channel/:channelId': 'Get ticket by channel ID'
+            },
+            stats: {
+                'GET /stats': 'Get guild statistics',
+                'GET /stats/staff/:userId': 'Get staff statistics'
+            },
+            categories: {
+                'GET /categories': 'List categories',
+                'POST /categories': 'Create category',
+                'PUT /categories/:id': 'Update category',
+                'DELETE /categories/:id': 'Delete category'
+            },
+            canned: {
+                'GET /canned': 'List canned responses',
+                'POST /canned': 'Create canned response',
+                'DELETE /canned/:name': 'Delete canned response'
+            }
+        }
+    });
+});
+
 // ==================== GUILD ====================
-app.get('/api/guild', authenticate, async (req, res) => {
+app.get(`${API_PREFIX}/guild`, authenticate, async (req, res) => {
     try {
         const guild = await guildDB.getOrCreate(req.guildId, 'Unknown');
-        res.json(guild);
+        res.json({
+            id: guild.id,
+            name: guild.name,
+            locale: guild.locale,
+            ticketCount: guild.ticketCount,
+            maxTicketsPerUser: guild.maxTicketsPerUser,
+            autoCloseHours: guild.autoCloseHours,
+            dmNotifications: guild.dmNotifications,
+            createdAt: guild.createdAt
+        });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        logger.error('API guild error:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-app.patch('/api/guild', authenticate, async (req, res) => {
+app.put(`${API_PREFIX}/guild`, authenticate, requirePermission('write'), async (req, res) => {
     try {
-        if (req.apiKey.permissions !== 'admin') {
-            return res.status(403).json({ error: 'Admin permission required' });
+        const allowedFields = ['maxTicketsPerUser', 'autoCloseHours', 'dmNotifications', 'locale', 'welcomeMessage'];
+        const updateData = {};
+
+        for (const field of allowedFields) {
+            if (req.body[field] !== undefined) {
+                updateData[field] = req.body[field];
+            }
         }
-        const guild = await guildDB.update(req.guildId, req.body);
-        res.json(guild);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
 
-// ==================== STATS ====================
-app.get('/api/stats', authenticate, async (req, res) => {
-    try {
-        const stats = await statsDB.getDetailed(req.guildId);
-        res.json(stats);
+        const guild = await guildDB.update(req.guildId, updateData);
+        res.json({ success: true, guild });
     } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-app.get('/api/stats/daily', authenticate, async (req, res) => {
-    try {
-        const days = parseInt(req.query.days) || 30;
-        const stats = await dailyStatsDB.getLast30Days(req.guildId);
-        res.json(stats);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-app.get('/api/stats/leaderboard', authenticate, async (req, res) => {
-    try {
-        const type = req.query.type || 'xp';
-        const limit = parseInt(req.query.limit) || 10;
-        const leaderboard = await getLeaderboard(req.guildId, type, limit);
-        res.json(leaderboard);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+        logger.error('API guild update error:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
 // ==================== TICKETS ====================
-app.get('/api/tickets', authenticate, async (req, res) => {
+app.get(`${API_PREFIX}/tickets`, authenticate, async (req, res) => {
     try {
-        const { status, limit = 100 } = req.query;
+        const { status, userId, limit = 50 } = req.query;
+        
         let tickets;
-        if (status) {
+        if (status && status !== 'all') {
             tickets = await ticketDB.getTicketsByStatus(req.guildId, status);
         } else {
             tickets = await ticketDB.getAllTickets(req.guildId);
         }
-        res.json(tickets.slice(0, parseInt(limit)));
+
+        if (userId) {
+            tickets = tickets.filter(t => t.userId === userId);
+        }
+
+        tickets = tickets.slice(0, parseInt(limit));
+
+        res.json({
+            count: tickets.length,
+            tickets: tickets.map(t => ({
+                id: t.id,
+                ticketNumber: t.ticketNumber,
+                channelId: t.channelId,
+                userId: t.userId,
+                status: t.status,
+                priority: t.priority,
+                claimedBy: t.claimedBy,
+                messageCount: t.messageCount,
+                createdAt: t.createdAt,
+                closedAt: t.closedAt
+            }))
+        });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        logger.error('API tickets error:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-app.get('/api/tickets/:channelId', authenticate, async (req, res) => {
+app.get(`${API_PREFIX}/tickets/channel/:channelId`, authenticate, async (req, res) => {
     try {
         const ticket = await ticketDB.get(req.params.channelId);
+        
         if (!ticket || ticket.guildId !== req.guildId) {
             return res.status(404).json({ error: 'Ticket not found' });
         }
+
         res.json(ticket);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        logger.error('API ticket channel error:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-app.get('/api/tickets/:channelId/notes', authenticate, async (req, res) => {
+// ==================== STATS ====================
+app.get(`${API_PREFIX}/stats`, authenticate, async (req, res) => {
     try {
-        const ticket = await ticketDB.get(req.params.channelId);
-        if (!ticket || ticket.guildId !== req.guildId) {
-            return res.status(404).json({ error: 'Ticket not found' });
-        }
-        const notes = await noteDB.getAll(ticket.id);
-        res.json(notes);
+        const stats = await statsDB.getDetailed(req.guildId);
+        res.json(stats);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        logger.error('API stats error:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-app.get('/api/tickets/search/:query', authenticate, async (req, res) => {
+app.get(`${API_PREFIX}/stats/staff/:userId`, authenticate, async (req, res) => {
     try {
-        const tickets = await ticketDB.search(req.guildId, req.params.query);
-        res.json(tickets);
+        const stats = await ticketDB.getStaffStats(req.guildId, req.params.userId);
+        res.json(stats);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        logger.error('API staff stats error:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
 // ==================== CATEGORIES ====================
-app.get('/api/categories', authenticate, async (req, res) => {
+app.get(`${API_PREFIX}/categories`, authenticate, async (req, res) => {
     try {
         const categories = await categoryDB.getAll(req.guildId);
-        res.json(categories);
+        res.json({ count: categories.length, categories });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        logger.error('API categories error:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-app.post('/api/categories', authenticate, async (req, res) => {
+app.post(`${API_PREFIX}/categories`, authenticate, requirePermission('write'), async (req, res) => {
     try {
-        if (req.apiKey.permissions !== 'admin') {
-            return res.status(403).json({ error: 'Admin permission required' });
+        const { name, emoji, description, color } = req.body;
+        
+        if (!name) {
+            return res.status(400).json({ error: 'Name is required' });
         }
-        const category = await categoryDB.create(req.guildId, req.body.name, req.body);
+
+        const category = await categoryDB.create(req.guildId, name, { emoji, description, color });
+        res.status(201).json(category);
+    } catch (error) {
+        logger.error('API category create error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put(`${API_PREFIX}/categories/:id`, authenticate, requirePermission('write'), async (req, res) => {
+    try {
+        const category = await categoryDB.update(req.params.id, req.body);
         res.json(category);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        logger.error('API category update error:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-app.delete('/api/categories/:id', authenticate, async (req, res) => {
+app.delete(`${API_PREFIX}/categories/:id`, authenticate, requirePermission('write'), async (req, res) => {
     try {
-        if (req.apiKey.permissions !== 'admin') {
-            return res.status(403).json({ error: 'Admin permission required' });
-        }
         await categoryDB.delete(req.params.id);
         res.json({ success: true });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        logger.error('API category delete error:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
 // ==================== CANNED RESPONSES ====================
-app.get('/api/canned', authenticate, async (req, res) => {
+app.get(`${API_PREFIX}/canned`, authenticate, async (req, res) => {
     try {
         const responses = await cannedDB.getAll(req.guildId);
-        res.json(responses);
+        res.json({ count: responses.length, responses });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        logger.error('API canned error:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-app.post('/api/canned', authenticate, async (req, res) => {
+app.post(`${API_PREFIX}/canned`, authenticate, requirePermission('write'), async (req, res) => {
     try {
-        const response = await cannedDB.create(req.guildId, req.body.name, req.body.content, 'API');
-        res.json(response);
+        const { name, content } = req.body;
+        
+        if (!name || !content) {
+            return res.status(400).json({ error: 'Name and content are required' });
+        }
+
+        const response = await cannedDB.create(req.guildId, name, content, 'API');
+        res.status(201).json(response);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        logger.error('API canned create error:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-app.delete('/api/canned/:name', authenticate, async (req, res) => {
+app.delete(`${API_PREFIX}/canned/:name`, authenticate, requirePermission('write'), async (req, res) => {
     try {
         await cannedDB.delete(req.guildId, req.params.name);
         res.json({ success: true });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        logger.error('API canned delete error:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-// ==================== STAFF ====================
-app.get('/api/staff', authenticate, async (req, res) => {
-    try {
-        const staff = await staffDB.getAll(req.guildId);
-        res.json(staff);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+// ==================== ERROR HANDLER ====================
+app.use((err, req, res, next) => {
+    logger.error('API Error:', err);
+    res.status(500).json({ error: 'Internal server error' });
 });
 
-app.get('/api/staff/:userId', authenticate, async (req, res) => {
-    try {
-        const staff = await staffDB.get(req.guildId, req.params.userId);
-        if (!staff) return res.status(404).json({ error: 'Staff not found' });
-        res.json(staff);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// ==================== TEMPLATES ====================
-app.get('/api/templates', authenticate, async (req, res) => {
-    try {
-        const templates = await templateDB.getAll(req.guildId);
-        res.json(templates);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-app.post('/api/templates', authenticate, async (req, res) => {
-    try {
-        if (req.apiKey.permissions !== 'admin') {
-            return res.status(403).json({ error: 'Admin permission required' });
-        }
-        const template = await templateDB.create(req.guildId, req.body);
-        res.json(template);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// ==================== KNOWLEDGE BASE ====================
-app.get('/api/kb', authenticate, async (req, res) => {
-    try {
-        const articles = await kb.getAllArticles(req.guildId, req.query);
-        res.json(articles);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-app.get('/api/kb/:id', authenticate, async (req, res) => {
-    try {
-        const article = await kb.getArticle(req.params.id);
-        if (!article) return res.status(404).json({ error: 'Article not found' });
-        res.json(article);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-app.post('/api/kb', authenticate, async (req, res) => {
-    try {
-        if (req.apiKey.permissions !== 'admin') {
-            return res.status(403).json({ error: 'Admin permission required' });
-        }
-        const article = await kb.createArticle(req.guildId, req.body);
-        res.json(article);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-app.get('/api/kb/search/:query', authenticate, async (req, res) => {
-    try {
-        const articles = await kb.searchArticles(req.guildId, req.params.query);
-        res.json(articles);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// ==================== TRIGGERS ====================
-app.get('/api/triggers', authenticate, async (req, res) => {
-    try {
-        const list = await triggers.getTriggers(req.guildId);
-        res.json(list);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-app.post('/api/triggers', authenticate, async (req, res) => {
-    try {
-        if (req.apiKey.permissions !== 'admin') {
-            return res.status(403).json({ error: 'Admin permission required' });
-        }
-        const trigger = await triggers.createTrigger(req.guildId, req.body);
-        res.json(trigger);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-app.delete('/api/triggers/:id', authenticate, async (req, res) => {
-    try {
-        if (req.apiKey.permissions !== 'admin') {
-            return res.status(403).json({ error: 'Admin permission required' });
-        }
-        await triggers.deleteTrigger(req.params.id);
-        res.json({ success: true });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// ==================== AUDIT LOG ====================
-app.get('/api/audit', authenticate, async (req, res) => {
-    try {
-        const logs = await getAuditLogs(req.guildId, {
-            action: req.query.action,
-            targetType: req.query.targetType,
-            userId: req.query.userId,
-            limit: parseInt(req.query.limit) || 50,
-        });
-        res.json(logs);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// ==================== API KEYS ====================
-app.get('/api/keys', authenticate, async (req, res) => {
-    try {
-        if (req.apiKey.permissions !== 'admin') {
-            return res.status(403).json({ error: 'Admin permission required' });
-        }
-        const keys = await apiKeyDB.getAll(req.guildId);
-        res.json(keys);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// Health check
-app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-// Start server
-export function startServer(port = 3000) {
-    app.listen(port, () => {
-        logger.info(`🌐 REST API server running on port ${port}`);
+// ==================== START SERVER ====================
+export function startHealthServer() {
+    app.listen(PORT, () => {
+        logger.info(`✅ API Server started on port ${PORT}`);
     });
 }
 

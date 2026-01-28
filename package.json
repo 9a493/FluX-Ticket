@@ -1,33 +1,33 @@
 {
-  "name": "flux-ticket-bot",
-  "version": "3.0.0",
-  "description": "FluX Ticket Bot - MEGA Edition with 43+ Features",
-  "main": "src/index.js",
-  "type": "module",
-  "scripts": {
-    "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
-    "deploy": "node src/deploy-commands.js",
-    "db:push": "npx prisma db push",
-    "db:studio": "npx prisma studio",
-    "db:generate": "npx prisma generate"
-  },
-  "keywords": ["discord", "ticket", "bot", "support", "ai", "claude"],
-  "author": "FluX Digital",
-  "license": "MIT",
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.25.0",
-    "@prisma/client": "^5.10.0",
-    "cors": "^2.8.5",
-    "discord.js": "^14.14.1",
-    "dotenv": "^16.4.1",
-    "express": "^4.18.2",
-    "winston": "^3.11.0"
-  },
-  "devDependencies": {
-    "prisma": "^5.10.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  }
+    "name": "flux-ticket-bot",
+    "version": "2.0.0",
+    "description": "Advanced Discord Ticket Bot with Discord.js v14, Prisma ORM, REST API, Dashboard and many features",
+    "main": "src/index.js",
+    "type": "module",
+    "scripts": {
+        "start": "node src/index.js",
+        "dev": "node --watch src/index.js",
+        "deploy": "node src/deploy-commands.js",
+        "deploy:global": "node src/deploy-commands.js --global",
+        "db:push": "prisma db push",
+        "db:migrate": "prisma migrate dev",
+        "db:studio": "prisma studio",
+        "db:generate": "prisma generate"
+    },
+    "keywords": ["discord", "discord.js", "ticket", "bot", "support", "prisma", "api", "dashboard"],
+    "author": "FluX Team",
+    "license": "MIT",
+    "dependencies": {
+        "@prisma/client": "^5.9.1",
+        "discord.js": "^14.14.1",
+        "dotenv": "^16.4.1",
+        "express": "^4.18.2",
+        "winston": "^3.11.0"
+    },
+    "devDependencies": {
+        "prisma": "^5.9.1"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    }
 }
