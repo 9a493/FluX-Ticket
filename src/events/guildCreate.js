@@ -1,65 +1,48 @@
-import { Events, EmbedBuilder } from 'discord.js';
+import { Events, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 import logger from '../utils/logger.js';
+import { guildDB } from '../utils/database.js';
 
 export default {
     name: Events.GuildCreate,
     async execute(guild) {
-        logger.info(`✅ Yeni sunucuya eklendi: ${guild.name} (${guild.id}) - ${guild.memberCount} üye`);
+        logger.info(`📥 Bot yeni bir sunucuya eklendi: ${guild.name} (${guild.id})`);
 
-        // Sunucu sahibine hoş geldin mesajı gönder
         try {
-            const owner = await guild.fetchOwner();
-            
-            const welcomeEmbed = new EmbedBuilder()
-                .setColor('#5865F2')
-                .setTitle('🎉 Ticket Botunu Eklediğiniz İçin Teşekkürler!')
-                .setDescription(
-                    `Merhaba **${guild.name}** sunucusu!\n\n` +
-                    'Ticket sistemini kullanmaya başlamak için aşağıdaki adımları izleyin:'
-                )
-                .addFields(
-                    {
-                        name: '1️⃣ Setup Komutu',
-                        value: '`/setup` komutunu kullanarak ticket sistemini kurun. Bu komut ile:\n' +
-                               '• Ticket panelini göndereceğiniz kanalı seçin\n' +
-                               '• Ticketların oluşturulacağı kategoriyi belirleyin\n' +
-                               '• Yetkili rolünü atayın\n' +
-                               '• (Opsiyonel) Log kanalını seçin',
-                    },
-                    {
-                        name: '2️⃣ İzinleri Kontrol Edin',
-                        value: 'Botun şu izinlere sahip olduğundan emin olun:\n' +
-                               '• Kanalları Yönet\n' +
-                               '• Rolleri Yönet\n' +
-                               '• Mesaj Gönder\n' +
-                               '• Mesaj Geçmişini Görüntüle\n' +
-                               '• Embedler Gönder',
-                    },
-                    {
-                        name: '3️⃣ Kullanıma Başlayın',
-                        value: 'Setup tamamlandıktan sonra kullanıcılarınız ticket panelinden ticket oluşturabilir!',
-                    },
-                    {
-                        name: '📚 Yardım',
-                        value: 'Daha fazla bilgi için `/help` komutunu kullanabilirsiniz.',
-                    }
-                )
-                .setThumbnail(guild.iconURL())
-                .setFooter({ 
-                    text: 'Profesyonel Ticket Bot', 
-                    iconURL: guild.client.user.displayAvatarURL() 
-                })
-                .setTimestamp();
+            // Guild'i database'e ekle
+            await guildDB.getOrCreate(guild.id, guild.name);
+            logger.info(`✅ Guild database'e eklendi: ${guild.name}`);
 
-            await owner.send({ embeds: [welcomeEmbed] }).catch(() => {
-                logger.warn(`DM gönderilemedi: ${owner.user.tag} (${guild.name})`);
-            });
+            // Hoş geldin mesajı gönder (eğer izin varsa)
+            const systemChannel = guild.systemChannel;
+            const firstTextChannel = guild.channels.cache.find(
+                ch => ch.isTextBased() && ch.permissionsFor(guild.members.me).has(PermissionFlagsBits.SendMessages)
+            );
 
+            const targetChannel = systemChannel || firstTextChannel;
+
+            if (targetChannel) {
+                const embed = new EmbedBuilder()
+                    .setColor('#5865F2')
+                    .setTitle('🎫 FluX Ticket Bot')
+                    .setDescription(
+                        'Merhaba! FluX Ticket Bot sunucunuza eklendi.\n\n' +
+                        '**Kurulum:**\n' +
+                        '1. `/setup` - Bot ayarlarını yapılandırın\n' +
+                        '2. `/panel` - Ticket panelini gönderin\n' +
+                        '3. `/category add` - Ticket kategorileri ekleyin\n\n' +
+                        '**Yardım:**\n' +
+                        '`/help` - Tüm komutları görün\n\n' +
+                        '**Dashboard:**\n' +
+                        '[fluxdigital.com.tr](https://fluxdigital.com.tr) adresinden sunucunuzu yönetin.'
+                    )
+                    .setThumbnail(guild.client.user.displayAvatarURL())
+                    .setFooter({ text: 'FluX Digital', iconURL: guild.client.user.displayAvatarURL() })
+                    .setTimestamp();
+
+                await targetChannel.send({ embeds: [embed] });
+            }
         } catch (error) {
-            logger.error(`Guild create event hatası (${guild.name}):`, error);
+            logger.error('GuildCreate error:', error);
         }
-
-        // Eğer bir log kanalı varsa oraya da bildirim gönder
-        // (Gelecekte webhook ile merkezi log sistemi)
     },
 };

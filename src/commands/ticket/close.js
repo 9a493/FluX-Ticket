@@ -4,16 +4,11 @@ import { closeTicket } from '../../utils/ticketManager.js';
 export default {
     data: new SlashCommandBuilder()
         .setName('close')
-        .setDescription('Ticketı kapatır')
-        .addStringOption(option =>
-            option.setName('sebep')
-                .setDescription('Kapatma sebebi (opsiyonel)')
-                .setRequired(false)
-                .setMaxLength(200)
-        ),
+        .setDescription('Ticketı kapat')
+        .addStringOption(o => o.setName('sebep').setDescription('Kapatma sebebi')),
 
     async execute(interaction) {
-        // ticketManager'daki closeTicket fonksiyonunu kullan
-        await closeTicket(interaction);
+        const reason = interaction.options.getString('sebep');
+        await closeTicket(interaction, reason);
     },
 };

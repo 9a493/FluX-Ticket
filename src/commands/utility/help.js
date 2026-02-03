@@ -3,7 +3,7 @@ import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 export default {
     data: new SlashCommandBuilder()
         .setName('help')
-        .setDescription('Tüm komutları ve kullanımlarını gösterir'),
+        .setDescription('Komut listesini gösterir'),
 
     async execute(interaction) {
         const embed = new EmbedBuilder()
@@ -11,59 +11,28 @@ export default {
             .setTitle('📚 FluX Ticket Bot - Yardım')
             .setDescription('Aşağıda tüm komutların listesi bulunmaktadır.')
             .addFields(
-                {
-                    name: '🎫 Ticket Komutları',
-                    value: 
-                        '`/close [sebep]` - Ticketı kapatır\n' +
-                        '`/claim` - Ticketı sahiplenir\n' +
-                        '`/unclaim` - Ticket sahipliğini bırakır\n' +
-                        '`/add @kullanıcı` - Ticket\'a kullanıcı ekler\n' +
-                        '`/remove @kullanıcı` - Ticket\'tan kullanıcı çıkarır\n' +
-                        '`/rename <isim>` - Ticket kanalını yeniden adlandırır\n' +
-                        '`/transfer @yetkili [not]` - Ticketı başka yetkiliye devreder\n' +
-                        '`/move <kategori>` - Ticketı başka kategoriye taşır\n' +
-                        '`/priority <seviye>` - Ticket önceliğini belirler\n' +
-                        '`/tag add/remove/list` - Ticket etiketlerini yönetir\n' +
-                        '`/info` - Ticket bilgilerini gösterir',
-                    inline: false,
+                { 
+                    name: '🎫 Ticket Komutları', 
+                    value: '`/close` - Ticketı kapat\n`/claim` - Ticketı sahiplen\n`/unclaim` - Sahipliği bırak\n`/add` - Kullanıcı ekle\n`/remove` - Kullanıcı çıkar\n`/rename` - Adını değiştir\n`/transfer` - Devret\n`/priority` - Öncelik belirle\n`/tag` - Etiket ekle/kaldır\n`/info` - Bilgileri göster\n`/reopen` - Yeniden aç\n`/archive` - Arşivle\n`/scheduleclose` - Zamanla\n`/cancelclose` - İptal et\n`/canned` - Hazır yanıtlar',
+                    inline: false 
+                },
+                { 
+                    name: '👑 Yönetici Komutları', 
+                    value: '`/setup` - Bot kurulumu\n`/panel` - Ticket paneli\n`/category` - Kategoriler\n`/stats` - İstatistikler\n`/settings` - Ayarlar\n`/blacklist` - Engelle\n`/unblacklist` - Engeli kaldır\n`/apikey` - API anahtarları\n`/language` - Dil değiştir',
+                    inline: false 
+                },
+                { 
+                    name: '🔧 Genel Komutlar', 
+                    value: '`/ping` - Bot gecikmesi\n`/help` - Bu menü',
+                    inline: false 
                 },
                 {
-                    name: '👮 Yetkili Komutları',
-                    value: 
-                        '`/canned add/remove/list/use/edit` - Hazır yanıt yönetimi\n' +
-                        '`/mystats [@kullanıcı]` - Yetkili istatistikleri',
-                    inline: false,
-                },
-                {
-                    name: '⚙️ Yönetici Komutları',
-                    value: 
-                        '`/setup` - Bot kurulumu\n' +
-                        '`/panel [kanal]` - Ticket paneli gönderir\n' +
-                        '`/category add/remove/list/edit` - Kategori yönetimi\n' +
-                        '`/blacklist @kullanıcı [sebep]` - Kullanıcıyı engeller\n' +
-                        '`/unblacklist @kullanıcı` - Engeli kaldırır\n' +
-                        '`/stats` - Sunucu istatistikleri',
-                    inline: false,
-                },
-                {
-                    name: '🔧 Genel Komutlar',
-                    value: 
-                        '`/ping` - Bot gecikmesini gösterir\n' +
-                        '`/help` - Bu yardım mesajını gösterir',
-                    inline: false,
-                },
-                {
-                    name: '📖 Kullanım İpuçları',
-                    value: 
-                        '• Ticket açmak için paneldeki butona tıklayın\n' +
-                        '• Yetkililer `/claim` ile ticket sahiplenebilir\n' +
-                        '• `/priority` ile acil ticketları önceliklendirebilirsiniz\n' +
-                        '• `/canned use` ile hazır yanıtları hızlıca kullanın\n' +
-                        '• Kapatılan ticketlar otomatik olarak transcript oluşturur',
-                    inline: false,
+                    name: '🌐 Web Dashboard',
+                    value: '[fluxdigital.com.tr](https://fluxdigital.com.tr)\nAPI anahtarı ile sunucunuzu yönetin.',
+                    inline: false
                 },
             )
-            .setFooter({ text: 'FluX Ticket Bot • Destek Sistemi' })
+            .setFooter({ text: 'FluX Ticket v2.1 • FluX Digital' })
             .setTimestamp();
 
         await interaction.reply({ embeds: [embed], ephemeral: true });

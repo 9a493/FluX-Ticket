@@ -1,150 +1,73 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { ticketDB, guildDB } from '../../utils/database.js';
-import { scheduleClose, cancelScheduledClose } from '../../utils/scheduler.js';
+import { isStaff } from '../../utils/ticketManager.js';
+import { scheduleClose } from '../../utils/scheduler.js';
+import { t } from '../../utils/i18n.js';
 import logger from '../../utils/logger.js';
 
 export default {
     data: new SlashCommandBuilder()
         .setName('scheduleclose')
-        .setDescription('Ticket\'ı belirli bir süre sonra otomatik kapatır')
-        .addStringOption(option =>
-            option.setName('süre')
-                .setDescription('Ne kadar sonra kapatılsın? (örn: 1h, 30m, 2d)')
-                .setRequired(true)
-        )
-        .addStringOption(option =>
-            option.setName('sebep')
-                .setDescription('Kapatma sebebi')
-                .setRequired(false)
-                .setMaxLength(200)
-        ),
+        .setDescription('Ticketı zamanlanmış kapatmaya ayarla')
+        .addStringOption(o => o.setName('süre').setDescription('Süre (örn: 1h, 30m, 2d)').setRequired(true))
+        .addStringOption(o => o.setName('sebep').setDescription('Kapatma sebebi')),
 
     async execute(interaction) {
         await interaction.deferReply();
-
-        const channel = interaction.channel;
-        const member = interaction.member;
         const timeStr = interaction.options.getString('süre');
         const reason = interaction.options.getString('sebep');
 
         try {
-            // Bu bir ticket kanalı mı?
-            const ticket = await ticketDB.get(channel.id);
-            if (!ticket) {
-                return interaction.editReply({
-                    content: '❌ Bu komut sadece ticket kanallarında kullanılabilir!',
-                });
-            }
+            const ticket = await ticketDB.get(interaction.channel.id);
+            if (!ticket) return interaction.editReply({ content: t(interaction.guild.id, 'ticketChannelOnly') });
+            if (ticket.status === 'closed') return interaction.editReply({ content: '❌ Bu ticket zaten kapalı!' });
 
-            // Yetkili kontrolü
-            const guildConfig = await guildDB.getOrCreate(interaction.guild.id, interaction.guild.name);
-            const staffRoles = guildConfig.staffRoles 
-                ? guildConfig.staffRoles.split(',').filter(r => r)
-                : [];
-            
-            const isStaff = staffRoles.some(roleId => member.roles.cache.has(roleId));
-            if (!isStaff && !member.permissions.has('Administrator')) {
-                return interaction.editReply({
-                    content: '❌ Bu komutu kullanmak için yetkili olmalısınız!',
-                });
+            const config = await guildDB.get(interaction.guild.id);
+            if (!isStaff(interaction.member, config) && ticket.userId !== interaction.user.id) {
+                return interaction.editReply({ content: t(interaction.guild.id, 'staffOnly') });
             }
 
             // Süreyi parse et
-            const ms = parseTime(timeStr);
-            if (!ms || ms < 60000) { // Min 1 dakika
-                return interaction.editReply({
-                    content: '❌ Geçersiz süre! Örnekler: `30m`, `1h`, `2h30m`, `1d`\nMinimum: 1 dakika',
-                });
-            }
+            const match = timeStr.match(/^(\d+)(m|h|d)$/i);
+            if (!match) return interaction.editReply({ content: '❌ Geçersiz süre formatı! Örnek: 1h, 30m, 2d' });
 
-            if (ms > 7 * 24 * 60 * 60 * 1000) { // Max 7 gün
-                return interaction.editReply({
-                    content: '❌ Maksimum 7 gün sonrasına zamanlayabilirsiniz!',
-                });
-            }
+            const amount = parseInt(match[1]);
+            const unit = match[2].toLowerCase();
 
-            // Zamanla
+            let ms = 0;
+            if (unit === 'm') ms = amount * 60 * 1000;
+            else if (unit === 'h') ms = amount * 60 * 60 * 1000;
+            else if (unit === 'd') ms = amount * 24 * 60 * 60 * 1000;
+
+            if (ms < 60000) return interaction.editReply({ content: '❌ Minimum süre 1 dakikadır!' });
+            if (ms > 7 * 24 * 60 * 60 * 1000) return interaction.editReply({ content: '❌ Maksimum süre 7 gündür!' });
+
             const closeTime = new Date(Date.now() + ms);
-            await scheduleClose(channel.id, closeTime, interaction.user.id, reason);
 
             // Database'e kaydet
-            await ticketDB.update(channel.id, {
+            await ticketDB.update(interaction.channel.id, {
                 scheduledCloseAt: closeTime,
                 scheduledCloseBy: interaction.user.id,
                 scheduledCloseReason: reason,
             });
 
-            // Bilgilendirme
-            const embed = new EmbedBuilder()
-                .setColor('#FEE75C')
-                .setTitle('⏰ Zamanlanmış Kapatma')
-                .setDescription(
-                    `Bu ticket otomatik olarak kapatılacak:\n\n` +
-                    `📅 **<t:${Math.floor(closeTime.getTime() / 1000)}:F>**\n` +
-                    `⏱️ **<t:${Math.floor(closeTime.getTime() / 1000)}:R>**`
-                )
-                .addFields(
-                    { name: '📝 Ticket', value: `#${ticket.ticketNumber.toString().padStart(4, '0')}`, inline: true },
-                    { name: '👤 Zamanlayan', value: `${interaction.user}`, inline: true },
-                )
-                .setFooter({ text: 'İptal etmek için /cancelclose kullanın' })
-                .setTimestamp();
+            // Scheduler'a ekle
+            scheduleClose(interaction.channel.id, closeTime, interaction.user.id, reason);
 
-            if (reason) {
-                embed.addFields({ name: '📋 Sebep', value: reason, inline: false });
-            }
+            const embed = new EmbedBuilder().setColor('#FEE75C').setTitle('⏰ Zamanlanmış Kapatma')
+                .setDescription(`Bu ticket <t:${Math.floor(closeTime.getTime() / 1000)}:R> otomatik olarak kapatılacak.`)
+                .addFields(
+                    { name: '⏱️ Süre', value: timeStr, inline: true },
+                    { name: '📅 Kapatılacak', value: `<t:${Math.floor(closeTime.getTime() / 1000)}:F>`, inline: true },
+                )
+                .setFooter({ text: `${interaction.user.tag} • /cancelclose ile iptal edebilirsiniz` }).setTimestamp();
+
+            if (reason) embed.addFields({ name: '📋 Sebep', value: reason, inline: false });
 
             await interaction.editReply({ embeds: [embed] });
-
-            // Ticket sahibine bildir
-            await channel.send({
-                content: `<@${ticket.userId}>`,
-                embeds: [
-                    new EmbedBuilder()
-                        .setColor('#FEE75C')
-                        .setDescription(`⏰ Bu ticket **<t:${Math.floor(closeTime.getTime() / 1000)}:R>** otomatik olarak kapatılacak.`)
-                ],
-            });
-
-            logger.info(`Ticket #${ticket.ticketNumber} scheduled to close at ${closeTime.toISOString()} by ${interaction.user.tag}`);
-
         } catch (error) {
-            logger.error('Scheduleclose command hatası:', error);
-            await interaction.editReply({
-                content: '❌ Zamanlama ayarlanırken bir hata oluştu!',
-            });
+            logger.error('Scheduleclose error:', error);
+            await interaction.editReply({ content: '❌ Hata!' });
         }
     },
 };
-
-/**
- * Süre stringini milisaniyeye çevirir
- * Örnekler: "1h", "30m", "2d", "1h30m"
- */
-function parseTime(str) {
-    const regex = /(\d+)\s*(d|h|m|s)/gi;
-    let totalMs = 0;
-    let match;
-
-    while ((match = regex.exec(str)) !== null) {
-        const value = parseInt(match[1]);
-        const unit = match[2].toLowerCase();
-
-        switch (unit) {
-            case 'd':
-                totalMs += value * 24 * 60 * 60 * 1000;
-                break;
-            case 'h':
-                totalMs += value * 60 * 60 * 1000;
-                break;
-            case 'm':
-                totalMs += value * 60 * 1000;
-                break;
-            case 's':
-                totalMs += value * 1000;
-                break;
-        }
-    }
-
-    return totalMs;
-}

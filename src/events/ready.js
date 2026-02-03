@@ -5,41 +5,12 @@ export default {
     name: Events.ClientReady,
     once: true,
     async execute(client) {
-        logger.info(`✅ Bot hazır! ${client.user.tag} olarak giriş yapıldı`);
-        logger.info(`📊 ${client.guilds.cache.size} sunucuda aktif`);
-        logger.info(`👥 ${client.users.cache.size} kullanıcıya hizmet veriyor`);
-
-        // Bot aktivitesi - döngülü
-        const activities = [
-            { name: '/help ile komutlara bak', type: ActivityType.Playing },
-            { name: `${client.guilds.cache.size} sunucu`, type: ActivityType.Watching },
-            { name: 'Ticket Sistemi', type: ActivityType.Competing },
-            { name: 'Destek taleplerini', type: ActivityType.Listening },
-        ];
-
-        let activityIndex = 0;
-        const updateActivity = () => {
-            client.user.setActivity(activities[activityIndex]);
-            activityIndex = (activityIndex + 1) % activities.length;
-        };
-
-        // İlk aktiviteyi ayarla
-        updateActivity();
-
-        // Her 30 saniyede bir değiştir
-        setInterval(updateActivity, 30000);
-
-        // Bot durumu
-        client.user.setStatus('online');
-
-        // Shard bilgisi (sharding aktifse)
-        if (client.shard) {
-            logger.info(`🔷 Shard ID: ${client.shard.ids[0]}`);
-        }
-
-        // Sunucu bilgilerini logla
+        logger.info(`✅ Bot ready! Logged in as ${client.user.tag}`);
+        logger.info(`📊 Active in ${client.guilds.cache.size} servers`);
+        
+        // Log all guild names
         client.guilds.cache.forEach(guild => {
-            logger.info(`   📍 ${guild.name} (${guild.memberCount} üye)`);
+            logger.debug(`- ${guild.name} (${guild.id})`);
         });
     },
 };

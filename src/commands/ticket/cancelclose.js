@@ -1,80 +1,46 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { ticketDB, guildDB } from '../../utils/database.js';
+import { isStaff } from '../../utils/ticketManager.js';
 import { cancelScheduledClose } from '../../utils/scheduler.js';
+import { t } from '../../utils/i18n.js';
 import logger from '../../utils/logger.js';
 
 export default {
     data: new SlashCommandBuilder()
         .setName('cancelclose')
-        .setDescription('Zamanlanmış ticket kapatmayı iptal eder'),
+        .setDescription('Zamanlanmış kapatmayı iptal et'),
 
     async execute(interaction) {
         await interaction.deferReply();
 
-        const channel = interaction.channel;
-        const member = interaction.member;
-
         try {
-            // Bu bir ticket kanalı mı?
-            const ticket = await ticketDB.get(channel.id);
-            if (!ticket) {
-                return interaction.editReply({
-                    content: '❌ Bu komut sadece ticket kanallarında kullanılabilir!',
-                });
+            const ticket = await ticketDB.get(interaction.channel.id);
+            if (!ticket) return interaction.editReply({ content: t(interaction.guild.id, 'ticketChannelOnly') });
+            if (!ticket.scheduledCloseAt) return interaction.editReply({ content: '❌ Bu ticket için zamanlanmış kapatma yok!' });
+
+            const config = await guildDB.get(interaction.guild.id);
+            if (!isStaff(interaction.member, config) && ticket.userId !== interaction.user.id) {
+                return interaction.editReply({ content: t(interaction.guild.id, 'staffOnly') });
             }
 
-            // Zamanlanmış kapatma var mı?
-            if (!ticket.scheduledCloseAt) {
-                return interaction.editReply({
-                    content: '❌ Bu ticket için zamanlanmış kapatma bulunmuyor!',
-                });
-            }
+            // Scheduler'dan kaldır
+            cancelScheduledClose(interaction.channel.id);
 
-            // Yetkili kontrolü
-            const guildConfig = await guildDB.getOrCreate(interaction.guild.id, interaction.guild.name);
-            const staffRoles = guildConfig.staffRoles 
-                ? guildConfig.staffRoles.split(',').filter(r => r)
-                : [];
-            
-            const isStaff = staffRoles.some(roleId => member.roles.cache.has(roleId));
-            const isOwner = ticket.userId === interaction.user.id;
-            
-            if (!isStaff && !isOwner && !member.permissions.has('Administrator')) {
-                return interaction.editReply({
-                    content: '❌ Bu komutu kullanmak için yetkili veya ticket sahibi olmalısınız!',
-                });
-            }
-
-            // İptal et
-            cancelScheduledClose(channel.id);
-
-            // Database'den kaldır
-            await ticketDB.update(channel.id, {
+            // Database'den temizle
+            await ticketDB.update(interaction.channel.id, {
                 scheduledCloseAt: null,
                 scheduledCloseBy: null,
                 scheduledCloseReason: null,
             });
 
-            // Bilgilendirme
-            const embed = new EmbedBuilder()
-                .setColor('#57F287')
-                .setTitle('✅ Zamanlanmış Kapatma İptal Edildi')
-                .setDescription('Bu ticket için zamanlanmış kapatma iptal edildi.')
-                .addFields(
-                    { name: '📝 Ticket', value: `#${ticket.ticketNumber.toString().padStart(4, '0')}`, inline: true },
-                    { name: '👤 İptal Eden', value: `${interaction.user}`, inline: true },
-                )
-                .setTimestamp();
+            const embed = new EmbedBuilder().setColor('#57F287')
+                .setDescription(t(interaction.guild.id, 'scheduleCancelled'))
+                .setFooter({ text: `${interaction.user.tag}` }).setTimestamp();
 
             await interaction.editReply({ embeds: [embed] });
-
-            logger.info(`Scheduled close cancelled for ticket #${ticket.ticketNumber} by ${interaction.user.tag}`);
-
         } catch (error) {
-            logger.error('Cancelclose command hatası:', error);
-            await interaction.editReply({
-                content: '❌ Zamanlama iptal edilirken bir hata oluştu!',
-            });
+            logger.error('Cancelclose error:', error);
+            await interaction.editReply({ content: '❌ Hata!' });
         }
     },
 };

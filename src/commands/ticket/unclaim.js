@@ -1,71 +1,39 @@
-import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
+import { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 import { ticketDB, guildDB } from '../../utils/database.js';
+import { isStaff } from '../../utils/ticketManager.js';
+import { t } from '../../utils/i18n.js';
 import logger from '../../utils/logger.js';
 
 export default {
     data: new SlashCommandBuilder()
         .setName('unclaim')
-        .setDescription('Ticket sahipliğinden vazgeçer'),
+        .setDescription('Ticket sahipliğinden vazgeç'),
 
     async execute(interaction) {
         await interaction.deferReply();
 
-        const channel = interaction.channel;
-        const member = interaction.member;
-
         try {
-            // Bu bir ticket kanalı mı?
-            const ticket = await ticketDB.get(channel.id);
-            if (!ticket) {
-                return interaction.editReply({
-                    content: '❌ Bu komut sadece ticket kanallarında kullanılabilir!',
-                });
+            const ticket = await ticketDB.get(interaction.channel.id);
+            if (!ticket) return interaction.editReply({ content: t(interaction.guild.id, 'ticketChannelOnly') });
+            if (ticket.status !== 'claimed') return interaction.editReply({ content: t(interaction.guild.id, 'notClaimed') });
+
+            const config = await guildDB.get(interaction.guild.id);
+            if (ticket.claimedBy !== interaction.user.id && !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+                return interaction.editReply({ content: '❌ Bu ticketı sadece sahiplenen kişi veya admin bırakabilir!' });
             }
 
-            // Ticket claim edilmemiş mi?
-            if (ticket.status !== 'claimed') {
-                return interaction.editReply({
-                    content: '❌ Bu ticket henüz sahiplenilmemiş!',
-                });
-            }
+            await ticketDB.unclaim(interaction.channel.id);
 
-            // Sadece sahiplenen kişi veya admin unclaim yapabilir
-            if (ticket.claimedBy !== member.id && !member.permissions.has('Administrator')) {
-                return interaction.editReply({
-                    content: `❌ Bu ticketı sadece <@${ticket.claimedBy}> veya yöneticiler bırakabilir!`,
-                });
-            }
+            const num = ticket.ticketNumber.toString().padStart(4, '0');
+            await interaction.channel.setName(`ticket-${num}`).catch(() => {});
 
-            // Unclaim yap
-            await ticketDB.unclaim(channel.id);
-
-            // Kanal adını güncelle
-            const ticketNumber = ticket.ticketNumber.toString().padStart(4, '0');
-            await channel.setName(`ticket-${ticketNumber}`);
-
-            // Bilgilendirme mesajı
-            const embed = new EmbedBuilder()
-                .setColor('#FEE75C')
-                .setTitle('🔓 Ticket Serbest Bırakıldı')
-                .setDescription(
-                    `${interaction.user} bu ticketın sahipliğinden vazgeçti.\n\n` +
-                    `Bu ticket artık herhangi bir yetkili tarafından sahiplenebilir.`
-                )
-                .addFields(
-                    { name: '📝 Ticket', value: `#${ticketNumber}`, inline: true },
-                    { name: '👤 Bırakan', value: `${interaction.user}`, inline: true },
-                )
-                .setTimestamp();
+            const embed = new EmbedBuilder().setColor('#FEE75C').setTitle(t(interaction.guild.id, 'unclaimSuccess'))
+                .setDescription(t(interaction.guild.id, 'unclaimSuccessDesc', { user: interaction.user.toString() })).setTimestamp();
 
             await interaction.editReply({ embeds: [embed] });
-
-            logger.info(`Ticket #${ticket.ticketNumber} unclaimed by ${interaction.user.tag}`);
-
         } catch (error) {
-            logger.error('Unclaim command hatası:', error);
-            await interaction.editReply({
-                content: '❌ Ticket sahipliği bırakılırken bir hata oluştu!',
-            });
+            logger.error('Unclaim error:', error);
+            await interaction.editReply({ content: '❌ Hata!' });
         }
     },
 };

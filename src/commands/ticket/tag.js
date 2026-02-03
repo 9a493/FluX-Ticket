@@ -1,179 +1,60 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { ticketDB, guildDB } from '../../utils/database.js';
+import { isStaff } from '../../utils/ticketManager.js';
+import { t } from '../../utils/i18n.js';
 import logger from '../../utils/logger.js';
 
 export default {
     data: new SlashCommandBuilder()
         .setName('tag')
-        .setDescription('Ticket\'a etiket ekler veya kaldırır')
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('add')
-                .setDescription('Ticket\'a etiket ekler')
-                .addStringOption(option =>
-                    option.setName('etiket')
-                        .setDescription('Eklenecek etiket')
-                        .setRequired(true)
-                        .setMaxLength(30)
-                )
-        )
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('remove')
-                .setDescription('Ticket\'tan etiket kaldırır')
-                .addStringOption(option =>
-                    option.setName('etiket')
-                        .setDescription('Kaldırılacak etiket')
-                        .setRequired(true)
-                        .setAutocomplete(true)
-                )
-        )
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('list')
-                .setDescription('Ticket etiketlerini listeler')
-        ),
+        .setDescription('Ticket etiketlerini yönet')
+        .addSubcommand(s => s.setName('add').setDescription('Etiket ekle')
+            .addStringOption(o => o.setName('etiket').setDescription('Etiket adı').setRequired(true)))
+        .addSubcommand(s => s.setName('remove').setDescription('Etiket kaldır')
+            .addStringOption(o => o.setName('etiket').setDescription('Etiket adı').setRequired(true).setAutocomplete(true)))
+        .addSubcommand(s => s.setName('list').setDescription('Etiketleri listele')),
 
     async autocomplete(interaction) {
         const ticket = await ticketDB.get(interaction.channel.id);
-        if (!ticket || !ticket.tags) {
-            return interaction.respond([]);
-        }
-
-        const focusedValue = interaction.options.getFocused().toLowerCase();
+        if (!ticket?.tags) return interaction.respond([]);
         const tags = ticket.tags.split(',').filter(t => t);
-        
-        const filtered = tags
-            .filter(t => t.toLowerCase().includes(focusedValue))
-            .slice(0, 25);
-
-        await interaction.respond(
-            filtered.map(t => ({ name: t, value: t }))
-        );
+        const focused = interaction.options.getFocused().toLowerCase();
+        await interaction.respond(tags.filter(t => t.toLowerCase().includes(focused)).slice(0, 25).map(t => ({ name: t, value: t })));
     },
 
     async execute(interaction) {
-        const subcommand = interaction.options.getSubcommand();
-        const channel = interaction.channel;
-        const member = interaction.member;
+        const sub = interaction.options.getSubcommand();
+        await interaction.deferReply({ ephemeral: true });
 
         try {
-            // Bu bir ticket kanalı mı?
-            const ticket = await ticketDB.get(channel.id);
-            if (!ticket) {
-                return interaction.reply({
-                    content: '❌ Bu komut sadece ticket kanallarında kullanılabilir!',
-                    ephemeral: true,
-                });
-            }
+            const ticket = await ticketDB.get(interaction.channel.id);
+            if (!ticket) return interaction.editReply({ content: t(interaction.guild.id, 'ticketChannelOnly') });
 
-            // Yetkili kontrolü
-            const guildConfig = await guildDB.getOrCreate(interaction.guild.id, interaction.guild.name);
-            const staffRoles = guildConfig.staffRoles 
-                ? guildConfig.staffRoles.split(',').filter(r => r)
-                : [];
-            
-            const isStaff = staffRoles.some(roleId => member.roles.cache.has(roleId));
-            if (!isStaff && !member.permissions.has('Administrator')) {
-                return interaction.reply({
-                    content: '❌ Bu komutu kullanmak için yetkili olmalısınız!',
-                    ephemeral: true,
-                });
-            }
+            const config = await guildDB.get(interaction.guild.id);
+            if (!isStaff(interaction.member, config)) return interaction.editReply({ content: t(interaction.guild.id, 'staffOnly') });
 
-            switch (subcommand) {
-                case 'add':
-                    await handleAdd(interaction, ticket);
-                    break;
-                case 'remove':
-                    await handleRemove(interaction, ticket);
-                    break;
-                case 'list':
-                    await handleList(interaction, ticket);
-                    break;
-            }
+            const currentTags = ticket.tags ? ticket.tags.split(',').filter(t => t) : [];
 
+            if (sub === 'add') {
+                const tag = interaction.options.getString('etiket').toLowerCase();
+                if (currentTags.length >= 10) return interaction.editReply({ content: '❌ Maksimum 10 etiket eklenebilir!' });
+                if (currentTags.includes(tag)) return interaction.editReply({ content: '❌ Bu etiket zaten var!' });
+                await ticketDB.addTag(interaction.channel.id, tag);
+                await interaction.editReply({ content: `✅ Etiket eklendi: \`${tag}\`` });
+            }
+            else if (sub === 'remove') {
+                const tag = interaction.options.getString('etiket');
+                if (!currentTags.includes(tag)) return interaction.editReply({ content: '❌ Bu etiket yok!' });
+                await ticketDB.removeTag(interaction.channel.id, tag);
+                await interaction.editReply({ content: `🗑️ Etiket kaldırıldı: \`${tag}\`` });
+            }
+            else if (sub === 'list') {
+                if (!currentTags.length) return interaction.editReply({ content: '🏷️ Etiket yok.' });
+                await interaction.editReply({ content: `🏷️ Etiketler: ${currentTags.map(t => `\`${t}\``).join(', ')}` });
+            }
         } catch (error) {
-            logger.error('Tag command hatası:', error);
-            await interaction.reply({
-                content: '❌ Bir hata oluştu!',
-                ephemeral: true,
-            });
+            logger.error('Tag error:', error);
+            await interaction.editReply({ content: '❌ Hata!' });
         }
     },
 };
-
-async function handleAdd(interaction, ticket) {
-    const tag = interaction.options.getString('etiket').toLowerCase().replace(/\s+/g, '-');
-    
-    const currentTags = ticket.tags ? ticket.tags.split(',').filter(t => t) : [];
-    
-    if (currentTags.includes(tag)) {
-        return interaction.reply({
-            content: `❌ **${tag}** etiketi zaten ekli!`,
-            ephemeral: true,
-        });
-    }
-
-    if (currentTags.length >= 10) {
-        return interaction.reply({
-            content: '❌ Bir ticket\'a en fazla 10 etiket eklenebilir!',
-            ephemeral: true,
-        });
-    }
-
-    await ticketDB.addTag(interaction.channel.id, tag);
-
-    const embed = new EmbedBuilder()
-        .setColor('#57F287')
-        .setDescription(`✅ **${tag}** etiketi eklendi.`)
-        .setTimestamp();
-
-    await interaction.reply({ embeds: [embed] });
-
-    logger.info(`Tag added to ticket #${ticket.ticketNumber}: ${tag}`);
-}
-
-async function handleRemove(interaction, ticket) {
-    const tag = interaction.options.getString('etiket').toLowerCase();
-    
-    const currentTags = ticket.tags ? ticket.tags.split(',').filter(t => t) : [];
-    
-    if (!currentTags.includes(tag)) {
-        return interaction.reply({
-            content: `❌ **${tag}** etiketi bulunamadı!`,
-            ephemeral: true,
-        });
-    }
-
-    await ticketDB.removeTag(interaction.channel.id, tag);
-
-    const embed = new EmbedBuilder()
-        .setColor('#ED4245')
-        .setDescription(`✅ **${tag}** etiketi kaldırıldı.`)
-        .setTimestamp();
-
-    await interaction.reply({ embeds: [embed] });
-
-    logger.info(`Tag removed from ticket #${ticket.ticketNumber}: ${tag}`);
-}
-
-async function handleList(interaction, ticket) {
-    const tags = ticket.tags ? ticket.tags.split(',').filter(t => t) : [];
-
-    if (tags.length === 0) {
-        return interaction.reply({
-            content: '📋 Bu ticket\'ta henüz etiket yok.',
-            ephemeral: true,
-        });
-    }
-
-    const embed = new EmbedBuilder()
-        .setColor('#5865F2')
-        .setTitle('🏷️ Ticket Etiketleri')
-        .setDescription(tags.map(t => `\`${t}\``).join(' • '))
-        .setFooter({ text: `Toplam ${tags.length} etiket` })
-        .setTimestamp();
-
-    await interaction.reply({ embeds: [embed], ephemeral: true });
-}

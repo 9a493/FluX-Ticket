@@ -5,6 +5,9 @@ import logger from './logger.js';
 
 const webhookCache = new Map();
 
+/**
+ * Send a DM to a user
+ */
 export async function sendDM(user, options) {
     try {
         const embed = new EmbedBuilder()
@@ -19,14 +22,18 @@ export async function sendDM(user, options) {
         await user.send({ embeds: [embed] });
         return true;
     } catch (error) {
+        // DM kapalı olabilir, sessizce devam et
         return false;
     }
 }
 
+/**
+ * Send to webhook
+ */
 export async function sendWebhook(guildId, options) {
     try {
-        const config = await guildDB.getOrCreate(guildId, 'Unknown');
-        if (!config.webhookUrl) return false;
+        const config = await guildDB.get(guildId);
+        if (!config?.webhookUrl) return false;
 
         let webhook = webhookCache.get(config.webhookUrl);
         if (!webhook) {
@@ -43,7 +50,8 @@ export async function sendWebhook(guildId, options) {
         if (options.fields) embed.addFields(options.fields);
 
         await webhook.send({
-            username: options.username || 'Ticket Bot',
+            username: options.username || 'FluX Ticket',
+            avatarURL: options.avatarURL || 'https://fluxdigital.com.tr/favicon.ico',
             embeds: [embed],
         });
         return true;
@@ -53,78 +61,146 @@ export async function sendWebhook(guildId, options) {
     }
 }
 
+/**
+ * Notify when ticket is created
+ */
 export async function notifyTicketCreated(client, ticket, guild, user) {
-    const config = await guildDB.getOrCreate(guild.id, guild.name);
-    const num = ticket.ticketNumber.toString().padStart(4, '0');
+    try {
+        const config = await guildDB.get(guild.id);
+        if (!config) return;
 
-    if (config.dmNotifications) {
-        await sendDM(user, {
-            title: t(guild.id, 'dmCreated', { number: num, guild: guild.name }),
-            description: 'Yetkili ekip en kısa sürede size yardımcı olacaktır.',
-            color: '#57F287',
-        });
-    }
+        const num = ticket.ticketNumber.toString().padStart(4, '0');
 
-    if (config.webhookUrl) {
-        await sendWebhook(guild.id, {
-            title: '📬 Yeni Ticket',
-            description: `**#${num}** - ${user.tag}`,
-            color: '#57F287',
-            fields: [
-                { name: 'Kullanıcı', value: `${user}`, inline: true },
-                { name: 'Ticket', value: `#${num}`, inline: true },
-            ],
-        });
-    }
-}
-
-export async function notifyTicketClaimed(client, ticket, guild, staff) {
-    const config = await guildDB.getOrCreate(guild.id, guild.name);
-    const num = ticket.ticketNumber.toString().padStart(4, '0');
-
-    if (config.dmNotifications) {
-        try {
-            const owner = await client.users.fetch(ticket.userId);
-            await sendDM(owner, {
-                title: t(guild.id, 'dmClaimed', { number: num, staff: staff.tag, guild: guild.name }),
-                description: `${staff.tag} size yardımcı olacak.`,
+        // DM Notification
+        if (config.dmNotifications) {
+            await sendDM(user, {
+                title: '🎫 Ticket Oluşturuldu',
+                description: `Ticket **#${num}** başarıyla oluşturuldu.\n\n**Sunucu:** ${guild.name}\n\nYetkili ekip en kısa sürede size yardımcı olacaktır.`,
                 color: '#57F287',
+                footer: 'FluX Ticket System',
             });
-        } catch (e) {}
-    }
+        }
 
-    if (config.webhookUrl) {
-        await sendWebhook(guild.id, {
-            title: '✅ Ticket Sahiplenildi',
-            description: `**#${num}** - ${staff.tag}`,
-            color: '#57F287',
-        });
+        // Webhook Notification
+        if (config.webhookUrl) {
+            await sendWebhook(guild.id, {
+                title: '📬 Yeni Ticket Açıldı',
+                description: `**#${num}** - ${user.tag}`,
+                color: '#57F287',
+                fields: [
+                    { name: 'Kullanıcı', value: `${user}`, inline: true },
+                    { name: 'Ticket', value: `#${num}`, inline: true },
+                ],
+            });
+        }
+    } catch (error) {
+        logger.error('notifyTicketCreated error:', error);
     }
 }
 
+/**
+ * Notify when ticket is claimed
+ */
+export async function notifyTicketClaimed(client, ticket, guild, staff) {
+    try {
+        const config = await guildDB.get(guild.id);
+        if (!config) return;
+
+        const num = ticket.ticketNumber.toString().padStart(4, '0');
+
+        // DM to ticket owner
+        if (config.dmNotifications) {
+            try {
+                const owner = await client.users.fetch(ticket.userId);
+                await sendDM(owner, {
+                    title: '✅ Ticket Sahiplenildi',
+                    description: `Ticket **#${num}** **${staff.tag}** tarafından sahiplenildi.\n\n**Sunucu:** ${guild.name}\n\nSize yardımcı olacak.`,
+                    color: '#57F287',
+                    footer: 'FluX Ticket System',
+                });
+            } catch (e) {}
+        }
+
+        // Webhook
+        if (config.webhookUrl) {
+            await sendWebhook(guild.id, {
+                title: '✅ Ticket Sahiplenildi',
+                description: `**#${num}** - ${staff.tag}`,
+                color: '#57F287',
+                fields: [
+                    { name: 'Yetkili', value: `${staff}`, inline: true },
+                    { name: 'Ticket', value: `#${num}`, inline: true },
+                ],
+            });
+        }
+    } catch (error) {
+        logger.error('notifyTicketClaimed error:', error);
+    }
+}
+
+/**
+ * Notify when ticket is closed
+ */
 export async function notifyTicketClosed(client, ticket, guild, closedBy, reason) {
-    const config = await guildDB.getOrCreate(guild.id, guild.name);
-    const num = ticket.ticketNumber.toString().padStart(4, '0');
+    try {
+        const config = await guildDB.get(guild.id);
+        if (!config) return;
 
-    if (config.dmNotifications) {
-        try {
-            const owner = await client.users.fetch(ticket.userId);
-            await sendDM(owner, {
-                title: t(guild.id, 'dmClosed', { number: num, guild: guild.name }),
-                description: reason ? `Sebep: ${reason}` : 'Destek için teşekkürler!',
+        const num = ticket.ticketNumber.toString().padStart(4, '0');
+
+        // DM to ticket owner
+        if (config.dmNotifications) {
+            try {
+                const owner = await client.users.fetch(ticket.userId);
+                await sendDM(owner, {
+                    title: '🔒 Ticket Kapatıldı',
+                    description: `Ticket **#${num}** kapatıldı.\n\n**Sunucu:** ${guild.name}${reason ? `\n**Sebep:** ${reason}` : ''}\n\nDestek için teşekkürler!`,
+                    color: '#ED4245',
+                    footer: 'FluX Ticket System',
+                });
+            } catch (e) {}
+        }
+
+        // Webhook
+        if (config.webhookUrl) {
+            await sendWebhook(guild.id, {
+                title: '🔒 Ticket Kapatıldı',
+                description: `**#${num}** - ${closedBy?.tag || 'Sistem'}`,
                 color: '#ED4245',
+                fields: reason ? [{ name: 'Sebep', value: reason }] : [],
             });
-        } catch (e) {}
-    }
-
-    if (config.webhookUrl) {
-        await sendWebhook(guild.id, {
-            title: '🔒 Ticket Kapatıldı',
-            description: `**#${num}** - ${closedBy?.tag || 'Sistem'}`,
-            color: '#ED4245',
-            fields: reason ? [{ name: 'Sebep', value: reason }] : [],
-        });
+        }
+    } catch (error) {
+        logger.error('notifyTicketClosed error:', error);
     }
 }
 
-export default { sendDM, sendWebhook, notifyTicketCreated, notifyTicketClaimed, notifyTicketClosed };
+/**
+ * Notify when user is added to ticket
+ */
+export async function notifyUserAdded(client, ticket, guild, addedUser, addedBy) {
+    try {
+        const config = await guildDB.get(guild.id);
+        if (!config?.dmNotifications) return;
+
+        const num = ticket.ticketNumber.toString().padStart(4, '0');
+
+        await sendDM(addedUser, {
+            title: '➕ Ticket\'a Eklendiniz',
+            description: `**#${num}** numaralı ticketa eklendiniz.\n\n**Sunucu:** ${guild.name}\n**Ekleyen:** ${addedBy.tag}`,
+            color: '#5865F2',
+            footer: 'FluX Ticket System',
+        });
+    } catch (error) {
+        logger.error('notifyUserAdded error:', error);
+    }
+}
+
+export default { 
+    sendDM, 
+    sendWebhook, 
+    notifyTicketCreated, 
+    notifyTicketClaimed, 
+    notifyTicketClosed,
+    notifyUserAdded,
+};

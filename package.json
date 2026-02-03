@@ -1,33 +1,46 @@
 {
-    "name": "flux-ticket-bot",
-    "version": "2.0.0",
-    "description": "Advanced Discord Ticket Bot with Discord.js v14, Prisma ORM, REST API, Dashboard and many features",
-    "main": "src/index.js",
-    "type": "module",
-    "scripts": {
-        "start": "node src/index.js",
-        "dev": "node --watch src/index.js",
-        "deploy": "node src/deploy-commands.js",
-        "deploy:global": "node src/deploy-commands.js --global",
-        "db:push": "prisma db push",
-        "db:migrate": "prisma migrate dev",
-        "db:studio": "prisma studio",
-        "db:generate": "prisma generate"
-    },
-    "keywords": ["discord", "discord.js", "ticket", "bot", "support", "prisma", "api", "dashboard"],
-    "author": "FluX Team",
-    "license": "MIT",
-    "dependencies": {
-        "@prisma/client": "^5.9.1",
-        "discord.js": "^14.14.1",
-        "dotenv": "^16.4.1",
-        "express": "^4.18.2",
-        "winston": "^3.11.0"
-    },
-    "devDependencies": {
-        "prisma": "^5.9.1"
-    },
-    "engines": {
-        "node": ">=18.0.0"
-    }
+  "name": "flux-ticket-bot",
+  "version": "2.1.0",
+  "description": "Professional Discord Ticket Bot with Web Dashboard",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node --no-warnings src/index.js",
+    "dev": "nodemon --no-warnings src/index.js",
+    "deploy": "node --no-warnings src/deploy-commands.js",
+    "deploy:global": "DEPLOY_GLOBAL=true node --no-warnings src/deploy-commands.js",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "build": "npm install && npx prisma generate && npx prisma db push"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "ticket",
+    "support",
+    "dashboard"
+  ],
+  "author": "FluX Digital",
+  "license": "MIT",
+  "dependencies": {
+    "@prisma/client": "^5.9.1",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.1",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "compression": "^1.7.4",
+    "express-rate-limit": "^7.1.5",
+    "winston": "^3.11.0",
+    "crypto": "^1.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3",
+    "prisma": "^5.9.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }

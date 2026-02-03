@@ -1,179 +1,66 @@
 import { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 import { ticketDB, guildDB } from '../../utils/database.js';
-import { generateTranscript } from '../../utils/transcript.js';
+import { isStaff } from '../../utils/ticketManager.js';
+import { generateTranscript, createTranscriptEmbed } from '../../utils/transcript.js';
+import { t } from '../../utils/i18n.js';
 import logger from '../../utils/logger.js';
+
+const BASE_URL = process.env.BASE_URL || 'https://fluxdigital.com.tr';
 
 export default {
     data: new SlashCommandBuilder()
         .setName('archive')
-        .setDescription('Ticket\'ı silmeden arşivler (salt okunur)')
-        .addStringOption(option =>
-            option.setName('sebep')
-                .setDescription('Arşivleme sebebi')
-                .setRequired(false)
-                .setMaxLength(200)
-        ),
+        .setDescription('Ticketı arşivle (salt okunur)'),
 
     async execute(interaction) {
         await interaction.deferReply();
 
-        const channel = interaction.channel;
-        const member = interaction.member;
-        const reason = interaction.options.getString('sebep');
-
         try {
-            // Bu bir ticket kanalı mı?
-            const ticket = await ticketDB.get(channel.id);
-            if (!ticket) {
-                return interaction.editReply({
-                    content: '❌ Bu komut sadece ticket kanallarında kullanılabilir!',
-                });
-            }
+            const ticket = await ticketDB.get(interaction.channel.id);
+            if (!ticket) return interaction.editReply({ content: t(interaction.guild.id, 'ticketChannelOnly') });
+            if (ticket.status === 'archived') return interaction.editReply({ content: '❌ Bu ticket zaten arşivlenmiş!' });
 
-            // Zaten arşivlenmiş mi?
-            if (ticket.status === 'archived') {
-                return interaction.editReply({
-                    content: '❌ Bu ticket zaten arşivlenmiş!',
-                });
-            }
-
-            // Yetkili kontrolü
-            const guildConfig = await guildDB.getOrCreate(interaction.guild.id, interaction.guild.name);
-            const staffRoles = guildConfig.staffRoles 
-                ? guildConfig.staffRoles.split(',').filter(r => r)
-                : [];
-            
-            const isStaff = staffRoles.some(roleId => member.roles.cache.has(roleId));
-            if (!isStaff && !member.permissions.has('Administrator')) {
-                return interaction.editReply({
-                    content: '❌ Bu komutu kullanmak için yetkili olmalısınız!',
-                });
-            }
+            const config = await guildDB.get(interaction.guild.id);
+            if (!isStaff(interaction.member, config)) return interaction.editReply({ content: t(interaction.guild.id, 'staffOnly') });
 
             // Transcript oluştur
-            let transcriptUrl = null;
+            let transcriptId = null;
             try {
-                transcriptUrl = await generateTranscript(channel, ticket);
-            } catch (error) {
-                logger.error('Transcript oluşturma hatası (archive):', error);
+                transcriptId = await generateTranscript(interaction.channel, ticket, interaction.guild);
+            } catch (e) {
+                logger.error('Transcript error:', e);
             }
 
             // Database'de arşivle
-            await ticketDB.update(channel.id, {
-                status: 'archived',
-                closedBy: interaction.user.id,
-                closeReason: reason || 'Arşivlendi',
-                closedAt: new Date(),
-                transcriptUrl,
-            });
+            await ticketDB.update(interaction.channel.id, { status: 'archived' });
 
-            // Kanal izinlerini güncelle (salt okunur)
-            try {
-                // Herkesten mesaj gönderme iznini kaldır
-                await channel.permissionOverwrites.edit(interaction.guild.id, {
-                    SendMessages: false,
-                });
+            // Yazma iznini kaldır (salt okunur)
+            await interaction.channel.permissionOverwrites.edit(ticket.userId, { SendMessages: false }).catch(() => {});
+            await interaction.channel.permissionOverwrites.edit(interaction.guild.id, { SendMessages: false }).catch(() => {});
 
-                // Ticket sahibinden mesaj iznini kaldır
-                await channel.permissionOverwrites.edit(ticket.userId, {
-                    SendMessages: false,
-                    ViewChannel: true,
-                });
+            // Kanal adını güncelle
+            const num = ticket.ticketNumber.toString().padStart(4, '0');
+            await interaction.channel.setName(`📦-archived-${num}`).catch(() => {});
+            await interaction.channel.setTopic(`Arşivlenmiş Ticket #${num} | Salt Okunur`).catch(() => {});
 
-                // Staff'tan mesaj iznini kaldır
-                for (const roleId of staffRoles) {
-                    try {
-                        await channel.permissionOverwrites.edit(roleId, {
-                            SendMessages: false,
-                            ViewChannel: true,
-                        });
-                    } catch (error) {
-                        // Rol bulunamazsa devam et
-                    }
-                }
-
-                // Kanal adını güncelle
-                const ticketNumber = ticket.ticketNumber.toString().padStart(4, '0');
-                await channel.setName(`📦-archived-${ticketNumber}`);
-
-                // Topic güncelle
-                await channel.setTopic(`🔒 Arşivlenmiş Ticket #${ticketNumber} | Salt Okunur`);
-            } catch (error) {
-                logger.warn('Kanal izinleri güncellenirken hata:', error.message);
-            }
-
-            // Bilgilendirme mesajı
-            const embed = new EmbedBuilder()
-                .setColor('#9B59B6')
-                .setTitle('📦 Ticket Arşivlendi')
-                .setDescription(
-                    'Bu ticket arşivlendi ve salt okunur modda.\n\n' +
-                    '**Ne yapabilirsiniz?**\n' +
-                    '• Mesajları okuyabilirsiniz\n' +
-                    '• Yeni mesaj gönderemezsiniz\n' +
-                    '• `/reopen` ile yeniden açabilirsiniz\n' +
-                    '• `/close` ile tamamen kapatabilirsiniz'
-                )
-                .addFields(
-                    { name: '📝 Ticket', value: `#${ticket.ticketNumber.toString().padStart(4, '0')}`, inline: true },
-                    { name: '👤 Arşivleyen', value: `${interaction.user}`, inline: true },
-                    { name: '⏱️ Açık Kalma Süresi', value: formatDuration(Date.now() - new Date(ticket.createdAt).getTime()), inline: true },
-                )
-                .setTimestamp();
-
-            if (reason) {
-                embed.addFields({ name: '📋 Sebep', value: reason, inline: false });
-            }
-
-            if (transcriptUrl) {
-                embed.addFields({ name: '📄 Transcript', value: `[Görüntüle](${transcriptUrl})`, inline: true });
-            }
+            const embed = new EmbedBuilder().setColor('#9B59B6').setTitle(t(interaction.guild.id, 'archiveSuccess'))
+                .setDescription(t(interaction.guild.id, 'archiveDesc'))
+                .addFields({ name: '📄 Transcript', value: transcriptId ? `[Web'de Görüntüle](${BASE_URL}/transcript/${transcriptId})` : 'Oluşturulamadı', inline: true })
+                .setFooter({ text: `${interaction.user.tag}` }).setTimestamp();
 
             await interaction.editReply({ embeds: [embed] });
 
             // Log
-            if (guildConfig.logChannelId) {
-                try {
-                    const logChannel = await interaction.guild.channels.fetch(guildConfig.logChannelId);
-                    const logEmbed = new EmbedBuilder()
-                        .setColor('#9B59B6')
-                        .setTitle('📦 Ticket Arşivlendi')
-                        .addFields(
-                            { name: 'Ticket', value: `#${ticket.ticketNumber.toString().padStart(4, '0')}`, inline: true },
-                            { name: 'Arşivleyen', value: `${interaction.user}`, inline: true },
-                            { name: 'Ticket Sahibi', value: `<@${ticket.userId}>`, inline: true },
-                        )
-                        .setTimestamp();
-
-                    if (reason) {
-                        logEmbed.addFields({ name: 'Sebep', value: reason, inline: false });
-                    }
-                    
-                    await logChannel.send({ embeds: [logEmbed] });
-                } catch (error) {
-                    // Log hatası sessiz
+            if (config?.logChannelId && transcriptId) {
+                const log = await interaction.guild.channels.fetch(config.logChannelId).catch(() => null);
+                if (log) {
+                    const updated = await ticketDB.get(interaction.channel.id);
+                    await log.send({ embeds: [createTranscriptEmbed(updated, transcriptId, BASE_URL)] });
                 }
             }
-
-            logger.info(`Ticket #${ticket.ticketNumber} archived by ${interaction.user.tag}`);
-
         } catch (error) {
-            logger.error('Archive command hatası:', error);
-            await interaction.editReply({
-                content: '❌ Ticket arşivlenirken bir hata oluştu!',
-            });
+            logger.error('Archive error:', error);
+            await interaction.editReply({ content: '❌ Hata!' });
         }
     },
 };
-
-function formatDuration(ms) {
-    const seconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-
-    if (days > 0) return `${days} gün ${hours % 24} saat`;
-    if (hours > 0) return `${hours} saat ${minutes % 60} dakika`;
-    if (minutes > 0) return `${minutes} dakika`;
-    return `${seconds} saniye`;
-}

@@ -1,146 +1,65 @@
 import { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 import { apiKeyDB } from '../../utils/database.js';
+import { logAudit, AuditActions, TargetTypes } from '../../utils/auditLog.js';
 import logger from '../../utils/logger.js';
 
 export default {
     data: new SlashCommandBuilder()
         .setName('apikey')
-        .setDescription('API anahtarı yönetimi')
-        .addSubcommand(sub =>
-            sub.setName('create')
-                .setDescription('Yeni API anahtarı oluşturur')
-                .addStringOption(opt =>
-                    opt.setName('isim')
-                        .setDescription('Anahtar ismi')
-                        .setRequired(true)
-                )
-                .addStringOption(opt =>
-                    opt.setName('yetki')
-                        .setDescription('Yetki seviyesi')
-                        .setRequired(false)
-                        .addChoices(
-                            { name: 'Sadece Okuma', value: 'read' },
-                            { name: 'Okuma + Yazma', value: 'read,write' },
-                            { name: 'Tam Yetki', value: 'admin' },
-                        )
-                )
-        )
-        .addSubcommand(sub =>
-            sub.setName('list')
-                .setDescription('API anahtarlarını listeler')
-        )
-        .addSubcommand(sub =>
-            sub.setName('delete')
-                .setDescription('API anahtarını siler')
-                .addStringOption(opt =>
-                    opt.setName('id')
-                        .setDescription('Silinecek anahtarın ID\'si')
-                        .setRequired(true)
-                )
-        )
+        .setDescription('API anahtarlarını yönet')
+        .addSubcommand(s => s.setName('create').setDescription('Yeni API anahtarı oluştur')
+            .addStringOption(o => o.setName('isim').setDescription('Anahtar ismi').setRequired(true))
+            .addStringOption(o => o.setName('izin').setDescription('İzinler').addChoices(
+                { name: 'Sadece Okuma', value: 'read' },
+                { name: 'Okuma + Yazma', value: 'read,write' },
+                { name: 'Admin', value: 'admin' },
+            )))
+        .addSubcommand(s => s.setName('list').setDescription('API anahtarlarını listele'))
+        .addSubcommand(s => s.setName('delete').setDescription('API anahtarını sil')
+            .addStringOption(o => o.setName('id').setDescription('Anahtar ID').setRequired(true)))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     async execute(interaction) {
         const sub = interaction.options.getSubcommand();
+        await interaction.deferReply({ ephemeral: true });
 
-        switch (sub) {
-            case 'create':
-                await createKey(interaction);
-                break;
-            case 'list':
-                await listKeys(interaction);
-                break;
-            case 'delete':
-                await deleteKey(interaction);
-                break;
+        try {
+            if (sub === 'create') {
+                const name = interaction.options.getString('isim');
+                const permissions = interaction.options.getString('izin') || 'read';
+
+                const apiKey = await apiKeyDB.create(interaction.guild.id, name, permissions, interaction.user.id);
+                await logAudit({ guildId: interaction.guild.id, action: AuditActions.API_KEY_CREATE, targetType: TargetTypes.API_KEY, userId: interaction.user.id, userName: interaction.user.tag, targetId: apiKey.id });
+
+                const embed = new EmbedBuilder().setColor('#57F287').setTitle('🔑 API Anahtarı Oluşturuldu')
+                    .setDescription(`\`\`\`${apiKey.key}\`\`\``)
+                    .addFields(
+                        { name: 'İsim', value: name, inline: true },
+                        { name: 'İzinler', value: permissions, inline: true },
+                    )
+                    .setFooter({ text: '⚠️ Bu anahtarı güvenli bir yerde saklayın!' });
+                await interaction.editReply({ embeds: [embed] });
+            }
+            else if (sub === 'list') {
+                const keys = await apiKeyDB.getAll(interaction.guild.id);
+                if (!keys.length) return interaction.editReply({ content: '🔑 API anahtarı yok.' });
+
+                const embed = new EmbedBuilder().setColor('#5865F2').setTitle('🔑 API Anahtarları')
+                    .setDescription(keys.map(k => `**${k.name}** (${k.permissions})\nID: \`${k.id}\` | Kullanım: ${k.usageCount} | ${k.enabled ? '🟢' : '🔴'}`).join('\n\n'));
+                await interaction.editReply({ embeds: [embed] });
+            }
+            else if (sub === 'delete') {
+                const id = interaction.options.getString('id');
+                const key = await apiKeyDB.getById(id);
+                if (!key || key.guildId !== interaction.guild.id) return interaction.editReply({ content: '❌ Anahtar bulunamadı!' });
+
+                await apiKeyDB.delete(id);
+                await logAudit({ guildId: interaction.guild.id, action: AuditActions.API_KEY_DELETE, targetType: TargetTypes.API_KEY, userId: interaction.user.id, userName: interaction.user.tag, targetId: id });
+                await interaction.editReply({ content: `🗑️ API anahtarı silindi: ${key.name}` });
+            }
+        } catch (error) {
+            logger.error('APIKey error:', error);
+            await interaction.editReply({ content: '❌ Hata!' });
         }
     },
 };
-
-async function createKey(interaction) {
-    await interaction.deferReply({ ephemeral: true });
-
-    const name = interaction.options.getString('isim');
-    const permissions = interaction.options.getString('yetki') || 'read';
-
-    try {
-        const apiKey = await apiKeyDB.create(interaction.guild.id, name, permissions);
-
-        const embed = new EmbedBuilder()
-            .setColor('#57F287')
-            .setTitle('🔑 API Anahtarı Oluşturuldu')
-            .setDescription('Aşağıdaki anahtarı güvenli bir yerde saklayın. Bu anahtar bir daha gösterilmeyecek!')
-            .addFields(
-                { name: '📝 İsim', value: name, inline: true },
-                { name: '🔒 Yetkiler', value: permissions, inline: true },
-                { name: '🔑 Anahtar', value: `\`\`\`${apiKey.key}\`\`\`` },
-            )
-            .setFooter({ text: 'Bu anahtar ile Dashboard\'a giriş yapabilirsiniz' })
-            .setTimestamp();
-
-        await interaction.editReply({ embeds: [embed] });
-
-        logger.info(`API key created: ${name} for guild ${interaction.guild.name}`);
-
-    } catch (error) {
-        logger.error('API key create error:', error);
-        await interaction.editReply({ content: '❌ Bir hata oluştu!' });
-    }
-}
-
-async function listKeys(interaction) {
-    await interaction.deferReply({ ephemeral: true });
-
-    try {
-        const keys = await apiKeyDB.getAll(interaction.guild.id);
-
-        if (keys.length === 0) {
-            return interaction.editReply({ content: '📋 Henüz API anahtarı oluşturulmamış.' });
-        }
-
-        const embed = new EmbedBuilder()
-            .setColor('#5865F2')
-            .setTitle('🔑 API Anahtarları')
-            .setDescription(
-                keys.map((k, i) => {
-                    const status = k.enabled ? '🟢' : '🔴';
-                    const lastUsed = k.lastUsed 
-                        ? `<t:${Math.floor(new Date(k.lastUsed).getTime() / 1000)}:R>`
-                        : 'Hiç';
-                    return `${status} **${k.name}** (\`${k.id.slice(0, 8)}...\`)\n` +
-                           `   Yetkiler: \`${k.permissions}\` | Kullanım: ${k.usageCount} | Son: ${lastUsed}`;
-                }).join('\n\n')
-            )
-            .setFooter({ text: `Toplam ${keys.length} anahtar` })
-            .setTimestamp();
-
-        await interaction.editReply({ embeds: [embed] });
-
-    } catch (error) {
-        logger.error('API key list error:', error);
-        await interaction.editReply({ content: '❌ Bir hata oluştu!' });
-    }
-}
-
-async function deleteKey(interaction) {
-    await interaction.deferReply({ ephemeral: true });
-
-    const id = interaction.options.getString('id');
-
-    try {
-        await apiKeyDB.delete(id);
-
-        const embed = new EmbedBuilder()
-            .setColor('#ED4245')
-            .setDescription('🗑️ API anahtarı silindi.')
-            .setTimestamp();
-
-        await interaction.editReply({ embeds: [embed] });
-
-        logger.info(`API key deleted: ${id}`);
-
-    } catch (error) {
-        logger.error('API key delete error:', error);
-        await interaction.editReply({ content: '❌ Anahtar bulunamadı veya silinemedi!' });
-    }
-}

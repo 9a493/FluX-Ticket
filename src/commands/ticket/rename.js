@@ -1,59 +1,46 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
-import { ticketDB } from '../../utils/database.js';
+import { ticketDB, guildDB } from '../../utils/database.js';
+import { isStaff } from '../../utils/ticketManager.js';
+import { t } from '../../utils/i18n.js';
 import logger from '../../utils/logger.js';
 
 export default {
     data: new SlashCommandBuilder()
         .setName('rename')
-        .setDescription('Ticket kanalını yeniden adlandırır')
-        .addStringOption(option =>
-            option.setName('isim')
-                .setDescription('Yeni kanal adı')
-                .setRequired(true)
-                .setMaxLength(100)
-        ),
+        .setDescription('Ticket kanalının adını değiştir')
+        .addStringOption(o => o.setName('isim').setDescription('Yeni isim').setRequired(true)),
 
     async execute(interaction) {
         await interaction.deferReply({ ephemeral: true });
-
-        const channel = interaction.channel;
-        const newName = interaction.options.getString('isim');
+        const newName = interaction.options.getString('isim').toLowerCase().replace(/\s+/g, '-');
 
         try {
-            // Bu bir ticket kanalı mı?
-            const ticket = await ticketDB.get(channel.id);
-            if (!ticket) {
-                return interaction.editReply({
-                    content: '❌ Bu komut sadece ticket kanallarında kullanılabilir!',
-                });
+            const ticket = await ticketDB.get(interaction.channel.id);
+            if (!ticket) return interaction.editReply({ content: t(interaction.guild.id, 'ticketChannelOnly') });
+
+            const config = await guildDB.get(interaction.guild.id);
+            if (!isStaff(interaction.member, config)) return interaction.editReply({ content: t(interaction.guild.id, 'staffOnly') });
+
+            const oldName = interaction.channel.name;
+            await interaction.channel.setName(newName);
+
+            await interaction.editReply({ content: `✅ Kanal adı değiştirildi: ${oldName} → ${newName}` });
+
+            if (config?.logChannelId) {
+                const log = await interaction.guild.channels.fetch(config.logChannelId).catch(() => null);
+                if (log) {
+                    const embed = new EmbedBuilder().setColor('#5865F2').setTitle('✏️ Ticket Yeniden Adlandırıldı')
+                        .addFields(
+                            { name: 'Eski Ad', value: oldName, inline: true },
+                            { name: 'Yeni Ad', value: newName, inline: true },
+                            { name: 'Değiştiren', value: `${interaction.user}`, inline: true },
+                        ).setTimestamp();
+                    await log.send({ embeds: [embed] });
+                }
             }
-
-            const oldName = channel.name;
-
-            // Kanal adını değiştir
-            await channel.setName(newName);
-
-            // Bilgilendirme mesajı
-            const embed = new EmbedBuilder()
-                .setColor('#5865F2')
-                .setDescription(`✅ Kanal adı değiştirildi: **${oldName}** → **${newName}**`)
-                .setFooter({ text: `${interaction.user.tag} tarafından` })
-                .setTimestamp();
-
-            await interaction.editReply({
-                embeds: [embed],
-            });
-
-            // Kanala bilgi mesajı
-            await channel.send({ embeds: [embed] });
-
-            logger.info(`Ticket #${ticket.ticketNumber} renamed to ${newName} by ${interaction.user.tag}`);
-
         } catch (error) {
-            logger.error('Rename command hatası:', error);
-            await interaction.editReply({
-                content: '❌ Kanal adı değiştirilirken bir hata oluştu!',
-            });
+            logger.error('Rename error:', error);
+            await interaction.editReply({ content: '❌ Hata!' });
         }
     },
 };

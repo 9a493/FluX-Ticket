@@ -1,142 +1,47 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { ticketDB, guildDB } from '../../utils/database.js';
+import { isStaff } from '../../utils/ticketManager.js';
+import { t } from '../../utils/i18n.js';
 import logger from '../../utils/logger.js';
 
 export default {
     data: new SlashCommandBuilder()
         .setName('transfer')
-        .setDescription('Ticket\'ı başka bir yetkiliye devreder')
-        .addUserOption(option =>
-            option.setName('yetkili')
-                .setDescription('Ticket\'ın devredileceği yetkili')
-                .setRequired(true)
-        )
-        .addStringOption(option =>
-            option.setName('not')
-                .setDescription('Devir notu (opsiyonel)')
-                .setRequired(false)
-                .setMaxLength(200)
-        ),
+        .setDescription('Ticketı başka bir yetkiliye devret')
+        .addUserOption(o => o.setName('yetkili').setDescription('Devredilecek yetkili').setRequired(true)),
 
     async execute(interaction) {
         await interaction.deferReply();
-
-        const channel = interaction.channel;
-        const targetUser = interaction.options.getUser('yetkili');
-        const note = interaction.options.getString('not');
-        const member = interaction.member;
-        const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+        const newStaff = interaction.options.getUser('yetkili');
 
         try {
-            // Bu bir ticket kanalı mı?
-            const ticket = await ticketDB.get(channel.id);
-            if (!ticket) {
-                return interaction.editReply({
-                    content: '❌ Bu komut sadece ticket kanallarında kullanılabilir!',
-                });
-            }
+            const ticket = await ticketDB.get(interaction.channel.id);
+            if (!ticket) return interaction.editReply({ content: t(interaction.guild.id, 'ticketChannelOnly') });
 
-            // Yetkili kontrolü
-            const guildConfig = await guildDB.getOrCreate(interaction.guild.id, interaction.guild.name);
-            const staffRoles = guildConfig.staffRoles 
-                ? guildConfig.staffRoles.split(',').filter(r => r)
-                : [];
-            
-            const isStaff = staffRoles.some(roleId => member.roles.cache.has(roleId));
-            if (!isStaff && !member.permissions.has('Administrator')) {
-                return interaction.editReply({
-                    content: '❌ Bu komutu kullanmak için yetkili olmalısınız!',
-                });
-            }
+            const config = await guildDB.get(interaction.guild.id);
+            if (!isStaff(interaction.member, config)) return interaction.editReply({ content: t(interaction.guild.id, 'staffOnly') });
 
-            // Hedef yetkili mi?
-            if (!targetMember) {
-                return interaction.editReply({
-                    content: '❌ Hedef kullanıcı bu sunucuda bulunamadı!',
-                });
-            }
+            const member = await interaction.guild.members.fetch(newStaff.id).catch(() => null);
+            if (!member || !isStaff(member, config)) return interaction.editReply({ content: '❌ Hedef kullanıcı yetkili değil!' });
 
-            const targetIsStaff = staffRoles.some(roleId => targetMember.roles.cache.has(roleId));
-            if (!targetIsStaff && !targetMember.permissions.has('Administrator')) {
-                return interaction.editReply({
-                    content: '❌ Ticket sadece yetkililere devredilebilir!',
-                });
-            }
+            await ticketDB.claim(interaction.channel.id, newStaff.id, newStaff.tag);
 
-            // Kendine devretme
-            if (targetUser.id === interaction.user.id) {
-                return interaction.editReply({
-                    content: '❌ Ticket\'ı kendinize devredemezsiniz!',
-                });
-            }
+            const num = ticket.ticketNumber.toString().padStart(4, '0');
+            await interaction.channel.setName(`claimed-${num}-${newStaff.username}`).catch(() => {});
 
-            // Aynı kişiye devretme
-            if (ticket.claimedBy === targetUser.id) {
-                return interaction.editReply({
-                    content: `❌ Bu ticket zaten ${targetUser} tarafından sahiplenilmiş!`,
-                });
-            }
-
-            const previousOwner = ticket.claimedBy ? `<@${ticket.claimedBy}>` : 'Sahipsiz';
-
-            // Ticket'ı devret
-            await ticketDB.claim(channel.id, targetUser.id);
-
-            // Kanal adını güncelle
-            const baseName = channel.name.replace(/-[^-]+$/, '');
-            await channel.setName(`${baseName}-${targetUser.username}`);
-
-            // Bilgilendirme mesajı
-            const embed = new EmbedBuilder()
-                .setColor('#5865F2')
-                .setTitle('🔄 Ticket Devredildi')
-                .setDescription(
-                    `Bu ticket ${interaction.user} tarafından ${targetUser}'a devredildi.\n\n` +
-                    `${targetUser}, bu ticket artık sizin sorumluluğunuzda.`
-                )
-                .addFields(
-                    { name: '📝 Ticket', value: `#${ticket.ticketNumber.toString().padStart(4, '0')}`, inline: true },
-                    { name: '👤 Önceki Yetkili', value: previousOwner, inline: true },
-                    { name: '👤 Yeni Yetkili', value: `${targetUser}`, inline: true },
-                )
+            const embed = new EmbedBuilder().setColor('#5865F2').setTitle('🔄 Ticket Devredildi')
+                .setDescription(t(interaction.guild.id, 'transferSuccess', { from: interaction.user.toString(), to: newStaff.toString() }))
                 .setTimestamp();
 
-            if (note) {
-                embed.addFields({ name: '📋 Not', value: note, inline: false });
+            await interaction.editReply({ content: `${newStaff}`, embeds: [embed] });
+
+            if (config?.logChannelId) {
+                const log = await interaction.guild.channels.fetch(config.logChannelId).catch(() => null);
+                if (log) await log.send({ embeds: [embed.addFields({ name: 'Ticket', value: `#${num}`, inline: true })] });
             }
-
-            await interaction.editReply({ embeds: [embed] });
-
-            // Hedef kullanıcıya mention
-            await channel.send({ content: `${targetUser}` });
-
-            // Log
-            if (guildConfig.logChannelId) {
-                try {
-                    const logChannel = await interaction.guild.channels.fetch(guildConfig.logChannelId);
-                    const logEmbed = new EmbedBuilder()
-                        .setColor('#5865F2')
-                        .setTitle('🔄 Ticket Devredildi')
-                        .addFields(
-                            { name: 'Ticket', value: `#${ticket.ticketNumber.toString().padStart(4, '0')}`, inline: true },
-                            { name: 'Devreden', value: `${interaction.user}`, inline: true },
-                            { name: 'Yeni Yetkili', value: `${targetUser}`, inline: true },
-                        )
-                        .setTimestamp();
-                    
-                    await logChannel.send({ embeds: [logEmbed] });
-                } catch (error) {
-                    // Log hatası sessiz
-                }
-            }
-
-            logger.info(`Ticket #${ticket.ticketNumber} transferred from ${interaction.user.tag} to ${targetUser.tag}`);
-
         } catch (error) {
-            logger.error('Transfer command hatası:', error);
-            await interaction.editReply({
-                content: '❌ Ticket devredilirken bir hata oluştu!',
-            });
+            logger.error('Transfer error:', error);
+            await interaction.editReply({ content: '❌ Hata!' });
         }
     },
 };

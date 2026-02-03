@@ -1,99 +1,36 @@
-import { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
+import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { ticketDB, guildDB } from '../../utils/database.js';
+import { isStaff } from '../../utils/ticketManager.js';
+import { t } from '../../utils/i18n.js';
 import logger from '../../utils/logger.js';
 
 export default {
     data: new SlashCommandBuilder()
         .setName('remove')
-        .setDescription('Ticket\'tan kullanıcı çıkarır')
-        .addUserOption(option =>
-            option.setName('kullanıcı')
-                .setDescription('Çıkarılacak kullanıcı')
-                .setRequired(true)
-        ),
+        .setDescription('Kullanıcıyı tickettan çıkar')
+        .addUserOption(o => o.setName('kullanıcı').setDescription('Çıkarılacak kullanıcı').setRequired(true)),
 
     async execute(interaction) {
-        await interaction.deferReply({ ephemeral: true });
-
-        const channel = interaction.channel;
-        const userToRemove = interaction.options.getUser('kullanıcı');
-        const member = interaction.member;
+        await interaction.deferReply();
+        const user = interaction.options.getUser('kullanıcı');
 
         try {
-            // Bu bir ticket kanalı mı?
-            const ticket = await ticketDB.get(channel.id);
-            if (!ticket) {
-                return interaction.editReply({
-                    content: '❌ Bu komut sadece ticket kanallarında kullanılabilir!',
-                });
-            }
+            const ticket = await ticketDB.get(interaction.channel.id);
+            if (!ticket) return interaction.editReply({ content: t(interaction.guild.id, 'ticketChannelOnly') });
+            if (user.id === ticket.userId) return interaction.editReply({ content: t(interaction.guild.id, 'cannotRemoveOwner') });
 
-            // Yetki kontrolü: Ticket sahibi veya yetkili
-            const guildConfig = await guildDB.getOrCreate(interaction.guild.id, interaction.guild.name);
-            const staffRoles = guildConfig.staffRoles 
-                ? guildConfig.staffRoles.split(',').filter(r => r)
-                : [];
-            
-            const isStaff = staffRoles.some(roleId => member.roles.cache.has(roleId));
-            const isOwner = ticket.userId === interaction.user.id;
-            
-            if (!isStaff && !isOwner && !member.permissions.has('Administrator')) {
-                return interaction.editReply({
-                    content: '❌ Bu komutu kullanmak için ticket sahibi veya yetkili olmalısınız!',
-                });
-            }
+            const config = await guildDB.get(interaction.guild.id);
+            if (!isStaff(interaction.member, config)) return interaction.editReply({ content: t(interaction.guild.id, 'staffOnly') });
 
-            // Ticket sahibini çıkaramazsın
-            if (userToRemove.id === ticket.userId) {
-                return interaction.editReply({
-                    content: '❌ Ticket sahibini çıkaramazsınız!',
-                });
-            }
+            await interaction.channel.permissionOverwrites.delete(user.id);
 
-            // Kendini çıkarmaya çalışıyor mu?
-            if (userToRemove.id === interaction.user.id) {
-                return interaction.editReply({
-                    content: '❌ Kendinizi ticket\'tan çıkaramazsınız!',
-                });
-            }
+            const embed = new EmbedBuilder().setColor('#ED4245')
+                .setDescription(t(interaction.guild.id, 'userRemoved', { user: user.toString() })).setTimestamp();
 
-            // Kullanıcı ticket'ta mı?
-            const permissions = channel.permissionOverwrites.cache.get(userToRemove.id);
-            if (!permissions) {
-                return interaction.editReply({
-                    content: `❌ ${userToRemove} bu ticket'ta değil!`,
-                });
-            }
-
-            // Kullanıcıyı kanaldan çıkar
-            await channel.permissionOverwrites.delete(userToRemove.id);
-
-            // Bilgilendirme mesajı
-            const embed = new EmbedBuilder()
-                .setColor('#ED4245')
-                .setDescription(`✅ ${userToRemove} ticket'tan çıkarıldı.`)
-                .setTimestamp();
-
-            await interaction.editReply({
-                embeds: [embed],
-            });
-
-            // Kanala bilgi mesajı
-            const notificationEmbed = new EmbedBuilder()
-                .setColor('#ED4245')
-                .setTitle('👤 Kullanıcı Çıkarıldı')
-                .setDescription(`${userToRemove} ticket'tan ${interaction.user} tarafından çıkarıldı.`)
-                .setTimestamp();
-
-            await channel.send({ embeds: [notificationEmbed] });
-
-            logger.info(`${userToRemove.tag} removed from ticket #${ticket.ticketNumber} by ${interaction.user.tag}`);
-
+            await interaction.editReply({ embeds: [embed] });
         } catch (error) {
-            logger.error('Remove command hatası:', error);
-            await interaction.editReply({
-                content: '❌ Kullanıcı çıkarılırken bir hata oluştu!',
-            });
+            logger.error('Remove error:', error);
+            await interaction.editReply({ content: '❌ Hata!' });
         }
     },
 };

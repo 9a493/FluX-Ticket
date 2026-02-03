@@ -1,9 +1,12 @@
 import { EmbedBuilder } from 'discord.js';
 import { ticketDB, guildDB } from './database.js';
 import logger from './logger.js';
-import { generateTranscript } from './transcript.js';
+import { generateTranscript, createTranscriptEmbed } from './transcript.js';
+import { notifyTicketClosed } from './notifications.js';
 
-// Auto-close job interval (ms) - her 30 dakikada bir kontrol
+const BASE_URL = process.env.BASE_URL || 'https://fluxdigital.com.tr';
+
+// Auto-close check interval (ms) - her 30 dakikada bir kontrol
 const AUTO_CLOSE_INTERVAL = 30 * 60 * 1000;
 
 // Varsayılan inaktivite süresi (saat)
@@ -76,8 +79,13 @@ async function closeInactiveTicket(client, ticket) {
             return;
         }
 
+        // Guild config al
+        const guildConfig = await guildDB.get(guild.id);
+        const autoCloseHours = guildConfig?.autoCloseHours || DEFAULT_INACTIVE_HOURS;
+
         // Uyarı mesajı gönder (eğer daha önce gönderilmediyse)
-        const lastMessage = (await channel.messages.fetch({ limit: 1 })).first();
+        const messages = await channel.messages.fetch({ limit: 5 });
+        const lastMessage = messages.first();
         const isWarningMessage = lastMessage?.embeds[0]?.title?.includes('İnaktivite Uyarısı');
 
         if (!isWarningMessage) {
@@ -86,7 +94,7 @@ async function closeInactiveTicket(client, ticket) {
                 .setColor('#FEE75C')
                 .setTitle('⚠️ İnaktivite Uyarısı')
                 .setDescription(
-                    `Bu ticket **${DEFAULT_INACTIVE_HOURS} saat** boyunca inaktif kaldı.\n\n` +
+                    `Bu ticket **${autoCloseHours} saat** boyunca inaktif kaldı.\n\n` +
                     `**24 saat** içinde aktivite olmazsa ticket otomatik olarak kapatılacaktır.\n\n` +
                     `Ticket'ı açık tutmak için herhangi bir mesaj gönderin.`
                 )
@@ -110,9 +118,9 @@ async function closeInactiveTicket(client, ticket) {
         }
 
         // Transcript oluştur
-        let transcriptUrl = null;
+        let transcriptId = null;
         try {
-            transcriptUrl = await generateTranscript(channel, ticket);
+            transcriptId = await generateTranscript(channel, ticket, guild);
         } catch (error) {
             logger.error('Transcript hatası (auto-close):', error);
         }
@@ -122,7 +130,7 @@ async function closeInactiveTicket(client, ticket) {
             .setColor('#ED4245')
             .setTitle('🔒 Ticket Otomatik Kapatıldı')
             .setDescription(
-                `Bu ticket **${DEFAULT_INACTIVE_HOURS + 24} saat** boyunca inaktif kaldığı için otomatik olarak kapatıldı.\n\n` +
+                `Bu ticket **${autoCloseHours + 24} saat** boyunca inaktif kaldığı için otomatik olarak kapatıldı.\n\n` +
                 '5 saniye içinde bu kanal silinecek...'
             )
             .addFields(
@@ -131,20 +139,25 @@ async function closeInactiveTicket(client, ticket) {
             )
             .setTimestamp();
 
-        if (transcriptUrl) {
-            closeEmbed.addFields({ name: '📄 Transcript', value: `[Görüntüle](${transcriptUrl})`, inline: true });
+        if (transcriptId) {
+            closeEmbed.addFields({ 
+                name: '📄 Transcript', 
+                value: `[Web'de Görüntüle](${BASE_URL}/transcript/${transcriptId})`, 
+                inline: true 
+            });
         }
 
         await channel.send({ embeds: [closeEmbed] });
 
         // Database'de kapat
-        await ticketDB.close(ticket.channelId, 'SYSTEM', 'Otomatik kapatma - İnaktivite', transcriptUrl);
+        await ticketDB.close(ticket.channelId, 'SYSTEM', 'Otomatik kapatma - İnaktivite', 'System');
 
         // Log kanalına bildir
-        const guildConfig = await guildDB.getOrCreate(guild.id, guild.name);
-        if (guildConfig.logChannelId) {
+        if (guildConfig?.logChannelId || guildConfig?.transcriptChannelId) {
+            const logChannelId = guildConfig.transcriptChannelId || guildConfig.logChannelId;
             try {
-                const logChannel = await guild.channels.fetch(guildConfig.logChannelId);
+                const logChannel = await guild.channels.fetch(logChannelId);
+                
                 const logEmbed = new EmbedBuilder()
                     .setColor('#ED4245')
                     .setTitle('🤖 Ticket Otomatik Kapatıldı')
@@ -154,12 +167,23 @@ async function closeInactiveTicket(client, ticket) {
                         { name: 'Sebep', value: 'İnaktivite', inline: true },
                     )
                     .setTimestamp();
+
+                if (transcriptId) {
+                    logEmbed.addFields({
+                        name: '📄 Transcript',
+                        value: `[Web'de Görüntüle](${BASE_URL}/transcript/${transcriptId})`,
+                        inline: true
+                    });
+                }
                 
                 await logChannel.send({ embeds: [logEmbed] });
             } catch (error) {
                 // Log hatası sessiz
             }
         }
+
+        // DM bildirimi
+        await notifyTicketClosed(client, ticket, guild, null, 'Otomatik kapatma - İnaktivite');
 
         // 5 saniye sonra kanalı sil
         setTimeout(async () => {
