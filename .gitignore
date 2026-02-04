@@ -33,3 +33,6 @@ build/
 # Misc
 *.zip
 *.tar.gz
+
+*.db
+prisma/dev.db

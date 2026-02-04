@@ -10,6 +10,8 @@
     "deploy": "node --no-warnings src/deploy-commands.js",
     "deploy:global": "DEPLOY_GLOBAL=true node --no-warnings src/deploy-commands.js",
     "prisma:generate": "prisma generate",
+    "postinstall": "prisma generate",
+    "migrate": "prisma migrate deploy"
     "prisma:push": "prisma db push",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
